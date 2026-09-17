@@ -14,6 +14,7 @@ import (
 	"github.com/tacenva/tacenva-services/app"
 	"github.com/tacenva/tacenva-services/entity"
 	"github.com/tacenva/tacpass-core/auth"
+	"github.com/tacenva/tacpass-core/config"
 	coreEntity "github.com/tacenva/tacpass-core/entity"
 	"github.com/tacenva/tacpass-core/permission"
 	"github.com/tacenva/tacpass-core/util/keyring"
@@ -121,8 +122,6 @@ func (s *Service) ChangePassword(
 	)
 }
 
-const defaultPort = "49153"
-
 func normalizeAddress(address string) string {
 	address = strings.TrimSpace(address)
 
@@ -141,7 +140,7 @@ func normalizeAddress(address string) string {
 	}
 
 	if u.Port() == "" {
-		u.Host = net.JoinHostPort(u.Hostname(), defaultPort)
+		u.Host = net.JoinHostPort(u.Hostname(), string(config.DefaultPort))
 	}
 
 	return u.String()
