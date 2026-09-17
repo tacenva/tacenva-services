@@ -75,17 +75,12 @@ func (s *Service) List() ([]coreEntity.VaultAccess, bool, error) {
 
 	switch s.context.SelectedSoT.SyncMode {
 	case operationsEntity.SyncModeManual:
-		needSync, err := s.Remote.NeedSync()
-		if err != nil {
-			return nil, false, err
-		}
-
-		return nil, needSync, nil
+		return s.Remote.NeedSync()
 
 	case operationsEntity.SyncModeAuto:
 		vaultAccessList, err := s.Remote.Sync()
 		if err != nil {
-			return nil, false, err
+			return vaultAccessList, false, err
 		}
 
 		return vaultAccessList, false, nil
@@ -228,11 +223,41 @@ func (s *Service) ListRecords(
 		return vaultRecords, false, nil
 	}
 
-	return s.Remote.SyncRecords(
-		vaultAccess.VaultID,
-		vaultFile,
-		vaultRecords,
-	)
+	switch s.context.SelectedSoT.SyncMode {
+	case operationsEntity.SyncModeManual:
+		needSync, err := s.Remote.NeedSyncRecords(
+			vaultAccess.VaultID,
+		)
+		if err != nil {
+			return vaultRecords, false, err
+		}
+
+		return vaultRecords, needSync, nil
+
+	case operationsEntity.SyncModeAuto:
+		needSync, err := s.Remote.NeedSyncRecords(
+			vaultAccess.VaultID,
+		)
+		if err != nil {
+			return vaultRecords, false, err
+		}
+
+		if !needSync {
+			return vaultRecords, false, nil
+		}
+
+		vaultRecords, err = s.Remote.SyncRecords(
+			vaultAccess.VaultID,
+		)
+		if err != nil {
+			return vaultRecords, false, err
+		}
+
+		return vaultRecords, false, nil
+
+	default:
+		return vaultRecords, false, nil
+	}
 }
 
 func (s *Service) AppendRecord(

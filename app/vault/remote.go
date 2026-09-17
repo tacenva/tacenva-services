@@ -6,7 +6,6 @@ import (
 	"github.com/tacenva/database"
 	"github.com/tacenva/tacenva-services/app"
 	"github.com/tacenva/tacenva-services/app/sourceoftruth"
-	operationsEntity "github.com/tacenva/tacenva-services/entity"
 	"github.com/tacenva/tacpass-core/config"
 	coreEntity "github.com/tacenva/tacpass-core/entity"
 )
@@ -32,42 +31,47 @@ func NewRemoteService(
 	}
 }
 
-func (s *remoteService) NeedSync() (bool, error) {
+func (s *remoteService) NeedSync() (
+	[]coreEntity.VaultAccess,
+	bool,
+	error,
+) {
+	vaultFile, err := s.database().File(
+		"vault",
+		s.masterKey,
+		database.FileModeOpenOrCreate,
+	)
+	if err != nil {
+		return nil, false, err
+	}
+
+	var vaultAccessList []coreEntity.VaultAccess
+
+	if err := vaultFile.FindAll(
+		&vaultAccessList,
+	); err != nil {
+		return nil, false, err
+	}
+
 	var result struct {
 		NeedSync bool `json:"need_sync"`
 	}
 
-	err := s.appDeps.Client.CheckVaultSync(
+	err = s.appDeps.Client.CheckVaultSync(
 		s.context.SelectedSoT.Address,
 		s.context.SelectedSoT.HashSync,
 		&result,
 	)
 	if err != nil {
-		return false, err
+		return vaultAccessList, false, err
 	}
-
-	return result.NeedSync, nil
+	return vaultAccessList, result.NeedSync, nil
 }
 
 func (s *remoteService) Sync() (
 	[]coreEntity.VaultAccess,
 	error,
 ) {
-	var result struct {
-		NeedSync        bool                     `json:"need_sync"`
-		ServerVaultHash string                   `json:"server_vault_hash"`
-		VaultAccessList []coreEntity.VaultAccess `json:"vault_access_list,omitempty"`
-	}
-
-	err := s.appDeps.Client.VaultSync(
-		s.context.SelectedSoT.Address,
-		s.context.SelectedSoT.HashSync,
-		&result,
-	)
-	if err != nil {
-		return nil, err
-	}
-
 	vaultFile, err := s.database().File(
 		"vault",
 		s.masterKey,
@@ -75,6 +79,29 @@ func (s *remoteService) Sync() (
 	)
 	if err != nil {
 		return nil, err
+	}
+
+	var vaultAccessList []coreEntity.VaultAccess
+
+	if err := vaultFile.FindAll(
+		&vaultAccessList,
+	); err != nil {
+		return nil, err
+	}
+
+	var result struct {
+		NeedSync        bool                     `json:"need_sync"`
+		ServerVaultHash string                   `json:"server_vault_hash"`
+		VaultAccessList []coreEntity.VaultAccess `json:"vault_access_list,omitempty"`
+	}
+
+	err = s.appDeps.Client.VaultSync(
+		s.context.SelectedSoT.Address,
+		s.context.SelectedSoT.HashSync,
+		&result,
+	)
+	if err != nil {
+		return vaultAccessList, err
 	}
 
 	if result.NeedSync {
@@ -94,7 +121,7 @@ func (s *remoteService) Sync() (
 		if err := vaultFile.Sync(
 			vaultAccessPointers,
 		); err != nil {
-			return nil, err
+			return vaultAccessList, err
 		}
 
 		s.context.SelectedSoT.HashSync =
@@ -103,16 +130,14 @@ func (s *remoteService) Sync() (
 		if err := s.sotService.Update(
 			s.context.SelectedSoT,
 		); err != nil {
-			return nil, err
+			return vaultAccessList, err
 		}
 	}
-
-	var vaultAccessList []coreEntity.VaultAccess
 
 	if err := vaultFile.FindAll(
 		&vaultAccessList,
 	); err != nil {
-		return nil, err
+		return vaultAccessList, err
 	}
 
 	return vaultAccessList, nil
@@ -252,6 +277,69 @@ func (s *remoteService) DeleteVault(
 	return s.database().Delete(vault.ID)
 }
 
+func (s *remoteService) NeedSyncRecords(
+	vaultID string,
+) (bool, error) {
+	version, err := s.database().GetVersion(vaultID)
+	if err != nil {
+		return false, err
+	}
+
+	var result struct {
+		NeedSync bool `json:"need_sync"`
+	}
+
+	err = s.appDeps.Client.CheckRecordBlob(
+		s.context.SelectedSoT.Address,
+		vaultID,
+		version,
+		&result,
+	)
+	if err != nil {
+		return false, err
+	}
+
+	return result.NeedSync, nil
+}
+
+func (s *remoteService) SyncRecords(
+	vaultID string,
+) ([]coreEntity.VaultRecord, error) {
+	blob, err := s.appDeps.Client.RecordBlob(
+		s.context.SelectedSoT.Address,
+		vaultID,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := s.database().Write(
+		vaultID,
+		blob,
+	); err != nil {
+		return nil, err
+	}
+
+	vaultFile, err := s.database().File(
+		vaultID,
+		"",
+		database.FileModeOpen,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	var vaultRecords []coreEntity.VaultRecord
+
+	if err := vaultFile.FindAll(
+		&vaultRecords,
+	); err != nil {
+		return nil, err
+	}
+
+	return vaultRecords, nil
+}
+
 func (s *remoteService) FetchRecordBlob(
 	vaultID string,
 ) error {
@@ -267,79 +355,6 @@ func (s *remoteService) FetchRecordBlob(
 		vaultID,
 		blob,
 	)
-}
-
-func (s *remoteService) SyncRecords(
-	vaultID string,
-	vaultFile *database.DatabaseFile,
-	vaultRecords []coreEntity.VaultRecord,
-) ([]coreEntity.VaultRecord, bool, error) {
-	version, err := s.database().GetVersion(vaultID)
-	if err != nil {
-		return nil, false, err
-	}
-
-	var result struct {
-		NeedSync bool   `json:"need_sync"`
-		Version  uint64 `json:"version"`
-	}
-
-	err = s.appDeps.Client.CheckRecordBlob(
-		s.context.SelectedSoT.Address,
-		vaultID,
-		version,
-		&result,
-	)
-	if err != nil {
-		return nil, false, err
-	}
-
-	switch s.context.SelectedSoT.SyncMode {
-	case operationsEntity.SyncModeManual:
-		return vaultRecords, result.NeedSync, nil
-
-	case operationsEntity.SyncModeAuto:
-		if !result.NeedSync {
-			return vaultRecords, false, nil
-		}
-
-		blob, err := s.appDeps.Client.RecordBlob(
-			s.context.SelectedSoT.Address,
-			vaultID,
-		)
-		if err != nil {
-			return nil, false, err
-		}
-
-		if err := s.database().Write(
-			vaultID,
-			blob,
-		); err != nil {
-			return nil, false, err
-		}
-
-		vaultFile, err = s.database().File(
-			vaultID,
-			"",
-			database.FileModeOpen,
-		)
-		if err != nil {
-			return nil, false, err
-		}
-
-		vaultRecords = nil
-
-		if err := vaultFile.FindAll(
-			&vaultRecords,
-		); err != nil {
-			return nil, false, err
-		}
-
-		return vaultRecords, false, nil
-
-	default:
-		return vaultRecords, false, nil
-	}
 }
 
 func (s *remoteService) AppendRecord(
