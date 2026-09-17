@@ -10,7 +10,6 @@ import (
 
 func (c *Client) ListVault(
 	address string,
-	body any,
 	result any,
 ) error {
 	return c.Get(
@@ -189,6 +188,22 @@ func (c *Client) GetVaultChangesCount(
 	)
 }
 
+func (c *Client) MarkVaultChangesSynced(
+	address string,
+	changeIDs []string,
+) error {
+	return c.Post(
+		address,
+		"/vault/changes/synced",
+		struct {
+			ChangeIDs []string `json:"change_ids"`
+		}{
+			ChangeIDs: changeIDs,
+		},
+		nil,
+	)
+}
+
 func (c *Client) GetRecordChanges(
 	address string,
 	vaultID string,
@@ -220,6 +235,28 @@ func (c *Client) GetRecordChangesCount(
 		address,
 		path,
 		result,
+	)
+}
+
+func (c *Client) MarkRecordChangesSynced(
+	address string,
+	vaultID string,
+	changeIDs []string,
+) error {
+	path := fmt.Sprintf(
+		"/vault/%s/record/changes/synced",
+		vaultID,
+	)
+
+	return c.Post(
+		address,
+		path,
+		struct {
+			ChangeIDs []string `json:"change_ids"`
+		}{
+			ChangeIDs: changeIDs,
+		},
+		nil,
 	)
 }
 

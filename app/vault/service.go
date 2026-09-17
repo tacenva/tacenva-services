@@ -255,7 +255,6 @@ func (s *Service) ListRecords(
 
 		vaultRecords, err = s.Remote.SyncRecords(
 			vaultAccess.VaultID,
-			vaultFile,
 		)
 		if err != nil {
 			return vaultRecords, false, err
