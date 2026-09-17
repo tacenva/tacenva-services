@@ -31,6 +31,85 @@ func NewRemoteService(
 	}
 }
 
+func (s *remoteService) FetchRecordBlob(
+	vaultID string,
+) error {
+	blob, err := s.appDeps.Client.RecordBlob(
+		s.context.SelectedSoT.Address,
+		vaultID,
+	)
+	if err != nil {
+		return err
+	}
+
+	return s.database().Write(
+		vaultID,
+		blob,
+	)
+}
+
+func (s *remoteService) EnsureVaultFile(
+	vaultID string,
+	vaultKey string,
+) (*database.DatabaseFile, error) {
+	vaultFile, err := s.database().File(
+		vaultID,
+		vaultKey,
+		database.FileModeOpen,
+	)
+	if err == nil {
+		return vaultFile, nil
+	}
+
+	if !errors.Is(err, database.ErrFileNotFound) {
+		return nil, err
+	}
+
+	if err := s.FetchRecordBlob(vaultID); err != nil {
+		return nil, err
+	}
+
+	return s.database().File(
+		vaultID,
+		vaultKey,
+		database.FileModeOpen,
+	)
+}
+
+func (s *remoteService) ListVaults() (
+	[]coreEntity.VaultAccess,
+	error,
+) {
+	var vaultAccessList []coreEntity.VaultAccess
+
+	if err := s.appDeps.Client.ListVault(
+		s.context.SelectedSoT.Address,
+		nil,
+		&vaultAccessList,
+	); err != nil {
+		return nil, err
+	}
+
+	vaultFile, err := s.database().File(
+		"vault",
+		s.masterKey,
+		database.FileModeOpenOrCreate,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	for i := range vaultAccessList {
+		vaultAccess := vaultAccessList[i]
+
+		if _, err := vaultFile.Insert(&vaultAccess); err != nil {
+			return nil, err
+		}
+	}
+
+	return vaultAccessList, nil
+}
+
 func (s *remoteService) NeedSync() (
 	[]coreEntity.VaultAccess,
 	bool,
@@ -39,9 +118,18 @@ func (s *remoteService) NeedSync() (
 	vaultFile, err := s.database().File(
 		"vault",
 		s.masterKey,
-		database.FileModeOpenOrCreate,
+		database.FileModeOpen,
 	)
 	if err != nil {
+		if errors.Is(err, database.ErrFileNotFound) {
+			vaultAccessList, err := s.ListVaults()
+			if err != nil {
+				return nil, false, err
+			}
+
+			return vaultAccessList, true, nil
+		}
+
 		return nil, false, err
 	}
 
@@ -54,18 +142,18 @@ func (s *remoteService) NeedSync() (
 	}
 
 	var result struct {
-		NeedSync bool `json:"need_sync"`
+		Count int64 `json:"count"`
 	}
 
-	err = s.appDeps.Client.CheckVaultSync(
+	err = s.appDeps.Client.GetVaultChangesCount(
 		s.context.SelectedSoT.Address,
-		s.context.SelectedSoT.HashSync,
 		&result,
 	)
 	if err != nil {
 		return vaultAccessList, false, err
 	}
-	return vaultAccessList, result.NeedSync, nil
+
+	return vaultAccessList, result.Count > 0, nil
 }
 
 func (s *remoteService) Sync() (
@@ -75,9 +163,13 @@ func (s *remoteService) Sync() (
 	vaultFile, err := s.database().File(
 		"vault",
 		s.masterKey,
-		database.FileModeOpenOrCreate,
+		database.FileModeOpen,
 	)
 	if err != nil {
+		if errors.Is(err, database.ErrFileNotFound) {
+			return s.ListVaults()
+		}
+
 		return nil, err
 	}
 
@@ -89,47 +181,38 @@ func (s *remoteService) Sync() (
 		return nil, err
 	}
 
-	var result struct {
-		NeedSync        bool                     `json:"need_sync"`
-		ServerVaultHash string                   `json:"server_vault_hash"`
-		VaultAccessList []coreEntity.VaultAccess `json:"vault_access_list,omitempty"`
-	}
+	var changes []coreEntity.VaultAccess
 
-	err = s.appDeps.Client.VaultSync(
+	err = s.appDeps.Client.GetVaultChanges(
 		s.context.SelectedSoT.Address,
-		s.context.SelectedSoT.HashSync,
-		&result,
+		&changes,
 	)
 	if err != nil {
 		return vaultAccessList, err
 	}
 
-	if result.NeedSync {
-		vaultAccessPointers := make(
-			[]*coreEntity.VaultAccess,
-			0,
-			len(result.VaultAccessList),
-		)
+	for i := range changes {
+		change := changes[i]
 
-		for i := range result.VaultAccessList {
-			vaultAccessPointers = append(
-				vaultAccessPointers,
-				&result.VaultAccessList[i],
-			)
+		found := false
+
+		for j := range vaultAccessList {
+			if vaultAccessList[j].ID == change.ID {
+				vaultAccessList[j] = change
+				found = true
+				break
+			}
 		}
 
-		if err := vaultFile.Sync(
-			vaultAccessPointers,
-		); err != nil {
-			return vaultAccessList, err
+		if found {
+			if err := vaultFile.Update(&change); err != nil {
+				return vaultAccessList, err
+			}
+
+			continue
 		}
 
-		s.context.SelectedSoT.HashSync =
-			result.ServerVaultHash
-
-		if err := s.sotService.Update(
-			s.context.SelectedSoT,
-		); err != nil {
+		if _, err := vaultFile.Insert(&change); err != nil {
 			return vaultAccessList, err
 		}
 	}
@@ -166,7 +249,7 @@ func (s *remoteService) CreateVault(
 	vaultFile, err := s.database().File(
 		"vault",
 		s.masterKey,
-		database.FileModeOpenOrCreate,
+		database.FileModeOpen,
 	)
 	if err != nil {
 		return nil, err
@@ -205,7 +288,7 @@ func (s *remoteService) UpdateVault(
 	vaultFile, err := s.database().File(
 		"vault",
 		s.masterKey,
-		database.FileModeOpenOrCreate,
+		database.FileModeOpen,
 	)
 	if err != nil {
 		return err
@@ -246,7 +329,7 @@ func (s *remoteService) DeleteVault(
 	vaultFile, err := s.database().File(
 		"vault",
 		s.masterKey,
-		database.FileModeOpenOrCreate,
+		database.FileModeOpen,
 	)
 	if err != nil {
 		return err
@@ -280,53 +363,81 @@ func (s *remoteService) DeleteVault(
 func (s *remoteService) NeedSyncRecords(
 	vaultID string,
 ) (bool, error) {
-	version, err := s.database().GetVersion(vaultID)
-	if err != nil {
-		return false, err
-	}
-
 	var result struct {
-		NeedSync bool `json:"need_sync"`
+		Count int64 `json:"count"`
 	}
 
-	err = s.appDeps.Client.CheckRecordBlob(
+	err := s.appDeps.Client.GetRecordChangesCount(
 		s.context.SelectedSoT.Address,
 		vaultID,
-		version,
 		&result,
 	)
 	if err != nil {
 		return false, err
 	}
 
-	return result.NeedSync, nil
+	return result.Count > 0, nil
+}
+
+type recordChange struct {
+	SyncChange struct {
+		ID        string `json:"id"`
+		Sequence  uint64 `json:"sequence"`
+		Entity    string `json:"entity"`
+		EntityID  string `json:"entity_id"`
+		Operation string `json:"operation"`
+	} `json:"sync_change"`
+
+	Record []byte `json:"record,omitempty"`
 }
 
 func (s *remoteService) SyncRecords(
 	vaultID string,
+	vaultFile *database.DatabaseFile,
 ) ([]coreEntity.VaultRecord, error) {
-	blob, err := s.appDeps.Client.RecordBlob(
+	var changes []recordChange
+
+	err := s.appDeps.Client.GetRecordChanges(
 		s.context.SelectedSoT.Address,
 		vaultID,
+		&changes,
 	)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := s.database().Write(
-		vaultID,
-		blob,
-	); err != nil {
-		return nil, err
-	}
+	for _, change := range changes {
+		switch change.SyncChange.Operation {
+		case "create":
+			if len(change.Record) == 0 {
+				continue
+			}
 
-	vaultFile, err := s.database().File(
-		vaultID,
-		"",
-		database.FileModeOpen,
-	)
-	if err != nil {
-		return nil, err
+			if _, err := vaultFile.InsertRaw(
+				change.Record,
+			); err != nil {
+				return nil, err
+			}
+
+		case "update":
+			if len(change.Record) == 0 {
+				continue
+			}
+
+			if err := vaultFile.UpdateRaw(
+				change.SyncChange.EntityID,
+				change.Record,
+			); err != nil {
+				return nil, err
+			}
+
+		case "delete":
+			if _, err := vaultFile.Delete(
+				change.SyncChange.EntityID,
+			); err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	var vaultRecords []coreEntity.VaultRecord
@@ -338,23 +449,6 @@ func (s *remoteService) SyncRecords(
 	}
 
 	return vaultRecords, nil
-}
-
-func (s *remoteService) FetchRecordBlob(
-	vaultID string,
-) error {
-	blob, err := s.appDeps.Client.RecordBlob(
-		s.context.SelectedSoT.Address,
-		vaultID,
-	)
-	if err != nil {
-		return err
-	}
-
-	return s.database().Write(
-		vaultID,
-		blob,
-	)
 }
 
 func (s *remoteService) AppendRecord(

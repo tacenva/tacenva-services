@@ -195,27 +195,34 @@ func (s *Service) ListRecords(
 		)
 	}
 
-	vaultFile, err := s.openVaultFile(vaultAccess)
+	vaultKey, err := s.context.SelectedSoT.KeyPair.Open(
+		vaultAccess.VaultKey,
+	)
 	if err != nil {
-		if !s.context.IsRemote ||
-			!errors.Is(err, database.ErrFileNotFound) {
-			return nil, false, err
-		}
-
-		if err := s.Remote.FetchRecordBlob(
-			vaultAccess.VaultID,
-		); err != nil {
-			return nil, false, err
-		}
-
-		vaultFile, err = s.openVaultFile(vaultAccess)
-		if err != nil {
-			return nil, false, err
-		}
+		return nil, false, err
 	}
 
-	vaultRecords, err := s.local.ListRecords(vaultFile)
+	var vaultFile *database.DatabaseFile
+
+	if s.context.IsRemote {
+		vaultFile, err = s.Remote.EnsureVaultFile(
+			vaultAccess.VaultID,
+			string(vaultKey),
+		)
+	} else {
+		vaultFile, err = s.local.OpenVaultFile(
+			vaultAccess.VaultID,
+			string(vaultKey),
+		)
+	}
+
 	if err != nil {
+		return nil, false, err
+	}
+
+	var vaultRecords []coreEntity.VaultRecord
+
+	if err := vaultFile.FindAll(&vaultRecords); err != nil {
 		return nil, false, err
 	}
 
@@ -248,6 +255,7 @@ func (s *Service) ListRecords(
 
 		vaultRecords, err = s.Remote.SyncRecords(
 			vaultAccess.VaultID,
+			vaultFile,
 		)
 		if err != nil {
 			return vaultRecords, false, err
@@ -444,6 +452,13 @@ func (s *Service) openVaultFile(
 	)
 	if err != nil {
 		return nil, err
+	}
+
+	if s.context.IsRemote {
+		return s.Remote.EnsureVaultFile(
+			vaultAccess.VaultID,
+			string(vaultKey),
+		)
 	}
 
 	return s.local.OpenVaultFile(

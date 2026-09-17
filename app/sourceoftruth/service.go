@@ -3,9 +3,12 @@ package sourceoftruth
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io/fs"
 	"net"
 	"net/url"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -13,10 +16,10 @@ import (
 	"github.com/tacenva/tacenva-services/api"
 	"github.com/tacenva/tacenva-services/app"
 	"github.com/tacenva/tacenva-services/entity"
+	"github.com/tacenva/tacpass-core/accesscontrol"
 	"github.com/tacenva/tacpass-core/auth"
 	"github.com/tacenva/tacpass-core/config"
 	coreEntity "github.com/tacenva/tacpass-core/entity"
-	"github.com/tacenva/tacpass-core/permission"
 	"github.com/tacenva/tacpass-core/util/keyring"
 )
 
@@ -25,21 +28,21 @@ var (
 )
 
 type Service struct {
-	appDeps           *app.Deps
-	sotFile           *database.DatabaseFile
-	authService       *auth.Service
-	permissionService *permission.Service
+	appDeps              *app.Deps
+	sotFile              *database.DatabaseFile
+	authService          *auth.Service
+	accessControlService *accesscontrol.Service
 }
 
 func NewService(
 	appDeps *app.Deps,
 	authService *auth.Service,
-	permissionService *permission.Service,
+	accessControlService *accesscontrol.Service,
 ) *Service {
 	return &Service{
-		appDeps:           appDeps,
-		authService:       authService,
-		permissionService: permissionService,
+		appDeps:              appDeps,
+		authService:          authService,
+		accessControlService: accessControlService,
 	}
 }
 
@@ -47,10 +50,7 @@ func (s *Service) Initialize(
 	name string,
 	hostname string,
 ) (string, *keyring.KeyPair, error) {
-	_, keyPair, err := s.permissionService.Create(
-		name,
-		coreEntity.PrivilegeAdmin,
-	)
+	_, keyPair, err := s.accessControlService.InitAdminPrivilege(name)
 	if err != nil {
 		return "", nil, err
 	}
@@ -112,14 +112,87 @@ func (s *Service) Access(
 	return nil
 }
 
+func findVaultDirectories(root string) ([]string, error) {
+	var result []string
+
+	err := filepath.WalkDir(root, func(
+		path string,
+		entry fs.DirEntry,
+		err error,
+	) error {
+		if err != nil {
+			return err
+		}
+
+		if entry.IsDir() {
+			return nil
+		}
+
+		if entry.Name() != "vault.tacenva" {
+			return nil
+		}
+
+		result = append(result, filepath.Dir(path))
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
 func (s *Service) ChangePassword(
 	currentPassword string,
 	newPassword string,
 ) error {
-	return s.sotFile.ChangePassword(
+	if err := s.sotFile.ChangePassword(
 		currentPassword,
 		newPassword,
-	)
+	); err != nil {
+		return err
+	}
+
+	var sotList []entity.SourceOfTruth
+	if err := s.sotFile.FindAll(&sotList); err != nil {
+		return err
+	}
+
+	for _, sot := range sotList {
+		db := database.New(
+			s.appDeps.Config.Path(
+				config.NodeDirName,
+				sot.ID,
+				"vault",
+			),
+		)
+
+		fileDB, err := db.File(
+			"vault",
+			currentPassword,
+			database.FileModeOpen,
+		)
+		if err != nil {
+			if errors.Is(err, database.ErrFileNotFound) {
+				continue
+			}
+
+			fmt.Print(err)
+
+			return err
+		}
+
+		if err := fileDB.ChangePassword(
+			currentPassword,
+			newPassword,
+		); err != nil {
+			fmt.Print(err)
+			return err
+		}
+	}
+
+	return nil
 }
 
 func normalizeAddress(address string) string {

@@ -8,40 +8,14 @@ import (
 	"strings"
 )
 
-func (c *Client) CheckVaultSync(
+func (c *Client) ListVault(
 	address string,
-	replicaVaultHash string,
+	body any,
 	result any,
 ) error {
-	body := struct {
-		ReplicaVaultHash string `json:"replica_vault_hash"`
-	}{
-		ReplicaVaultHash: replicaVaultHash,
-	}
-
-	return c.Post(
+	return c.Get(
 		address,
-		"/vault/sync/check",
-		body,
-		result,
-	)
-}
-
-func (c *Client) VaultSync(
-	address string,
-	replicaVaultHash string,
-	result any,
-) error {
-	body := struct {
-		ReplicaVaultHash string `json:"replica_vault_hash"`
-	}{
-		ReplicaVaultHash: replicaVaultHash,
-	}
-
-	return c.Post(
-		address,
-		"/vault/sync",
-		body,
+		"/vault",
 		result,
 	)
 }
@@ -56,6 +30,41 @@ func (c *Client) CreateVault(
 		"/vault",
 		body,
 		result,
+	)
+}
+
+func (c *Client) UpdateVault(
+	address string,
+	vaultID string,
+	body any,
+	result any,
+) error {
+	path := fmt.Sprintf(
+		"/vault/%s",
+		vaultID,
+	)
+
+	return c.Put(
+		address,
+		path,
+		body,
+		result,
+	)
+}
+
+func (c *Client) DeleteVault(
+	address string,
+	vaultID string,
+) error {
+	path := fmt.Sprintf(
+		"/vault/%s",
+		vaultID,
+	)
+
+	return c.Delete(
+		address,
+		path,
+		nil,
 	)
 }
 
@@ -78,31 +87,6 @@ func (c *Client) GetRecord(
 	)
 }
 
-func (c *Client) CheckRecordBlob(
-	address string,
-	vaultID string,
-	replicaVersion uint64,
-	result any,
-) error {
-	path := fmt.Sprintf(
-		"/vault/%s/record/blob/check",
-		vaultID,
-	)
-
-	body := struct {
-		ReplicaVersion uint64 `json:"replica_version"`
-	}{
-		ReplicaVersion: replicaVersion,
-	}
-
-	return c.Post(
-		address,
-		path,
-		body,
-		result,
-	)
-}
-
 func (c *Client) RecordBlob(
 	address string,
 	vaultID string,
@@ -113,7 +97,7 @@ func (c *Client) RecordBlob(
 	)
 
 	return c.doRaw(
-		http.MethodPost,
+		http.MethodGet,
 		address,
 		path,
 		nil,
@@ -180,6 +164,62 @@ func (c *Client) DeleteRecord(
 		address,
 		path,
 		nil,
+	)
+}
+
+func (c *Client) GetVaultChanges(
+	address string,
+	result any,
+) error {
+	return c.Get(
+		address,
+		"/vault/changes",
+		result,
+	)
+}
+
+func (c *Client) GetVaultChangesCount(
+	address string,
+	result any,
+) error {
+	return c.Get(
+		address,
+		"/vault/changes/count",
+		result,
+	)
+}
+
+func (c *Client) GetRecordChanges(
+	address string,
+	vaultID string,
+	result any,
+) error {
+	path := fmt.Sprintf(
+		"/vault/%s/record/changes",
+		vaultID,
+	)
+
+	return c.Get(
+		address,
+		path,
+		result,
+	)
+}
+
+func (c *Client) GetRecordChangesCount(
+	address string,
+	vaultID string,
+	result any,
+) error {
+	path := fmt.Sprintf(
+		"/vault/%s/record/changes/count",
+		vaultID,
+	)
+
+	return c.Get(
+		address,
+		path,
+		result,
 	)
 }
 
@@ -257,39 +297,4 @@ func (c *Client) doRaw(
 	}
 
 	return body, nil
-}
-
-func (c *Client) UpdateVault(
-	address string,
-	vaultID string,
-	body any,
-	result any,
-) error {
-	path := fmt.Sprintf(
-		"/vault/%s",
-		vaultID,
-	)
-
-	return c.Put(
-		address,
-		path,
-		body,
-		result,
-	)
-}
-
-func (c *Client) DeleteVault(
-	address string,
-	vaultID string,
-) error {
-	path := fmt.Sprintf(
-		"/vault/%s",
-		vaultID,
-	)
-
-	return c.Delete(
-		address,
-		path,
-		nil,
-	)
 }

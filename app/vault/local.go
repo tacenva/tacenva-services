@@ -134,20 +134,6 @@ func (s *localService) OpenVaultFile(
 	)
 }
 
-func (s *localService) ListRecords(
-	vaultFile *database.DatabaseFile,
-) ([]coreEntity.VaultRecord, error) {
-	var vaultRecords []coreEntity.VaultRecord
-
-	if err := vaultFile.FindAll(
-		&vaultRecords,
-	); err != nil {
-		return nil, err
-	}
-
-	return vaultRecords, nil
-}
-
 func (s *localService) AppendRecord(
 	vaultFile *database.DatabaseFile,
 	record *coreEntity.VaultRecord,
