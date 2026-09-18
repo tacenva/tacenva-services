@@ -334,17 +334,33 @@ func (s *Service) AppendRecord(
 	}
 
 	if s.context.IsRemote {
-		return s.remote.AppendRecord(
+		record, err = s.remote.AppendRecord(
 			vaultAccess.VaultID,
 			record,
 			[]byte(encrypted),
 		)
+		if err != nil {
+			return nil, err
+		}
+
+		if _, err := vaultFile.Insert(record); err != nil {
+			return nil, err
+		}
+
+		return record, nil
 	}
 
-	newID, err := s.local.AppendRecord(vaultAccess, record)
+	newID, err := s.local.AppendRecord(
+		vaultAccess,
+		record,
+	)
+	if err != nil {
+		return nil, err
+	}
+
 	record.ID = newID
 
-	return record, err
+	return record, nil
 }
 
 func (s *Service) UpdateRecord(
@@ -396,14 +412,30 @@ func (s *Service) UpdateRecord(
 	}
 
 	if s.context.IsRemote {
-		return s.remote.UpdateRecord(
+		record, err = s.remote.UpdateRecord(
 			vaultAccess.VaultID,
 			record,
 			[]byte(encrypted),
 		)
+		if err != nil {
+			return nil, err
+		}
+
+		if err := vaultFile.Update(record); err != nil {
+			return nil, err
+		}
+
+		return record, nil
 	}
 
-	return record, s.local.UpdateRecord(vaultAccess, record)
+	if err := s.local.UpdateRecord(
+		vaultAccess,
+		record,
+	); err != nil {
+		return nil, err
+	}
+
+	return record, nil
 }
 
 func (s *Service) DeleteRecord(
