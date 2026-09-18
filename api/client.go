@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
@@ -10,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -23,6 +25,14 @@ type TLSConfig struct {
 	// Dipanggil ketika server pertama kali dipercaya.
 	// Parameter berisi fingerprint SPKI SHA-256.
 	OnFirstTrust func(fingerprint string) error
+
+	// Alamat TCP yang digunakan untuk koneksi.
+	//
+	// Contoh:
+	//   192.168.100.36:49153
+	//
+	// Berbeda dengan hostname TLS.
+	DialAddress string
 }
 
 type Client struct {
@@ -48,24 +58,75 @@ func (c *Client) ClearToken() {
 	c.Token = ""
 }
 
-func (c *Client) ConfigureTLS(
+// ConfigureDialAddress mendaftarkan alamat TCP aktual untuk sebuah
+// logical server address.
+//
+// Contoh:
+//
+//	address:     https://archpc.local:49153
+//	dialAddress: 192.168.100.36:49153
+//
+// URL dan TLS tetap menggunakan archpc.local.
+// Hanya koneksi TCP yang diarahkan langsung ke IP.
+func (c *Client) ConfigureDialAddress(
 	address string,
-	config TLSConfig,
+	dialAddress string,
 ) {
-	address = strings.TrimRight(address, "/")
+	address = strings.TrimRight(
+		address,
+		"/",
+	)
+
+	dialAddress = strings.TrimSpace(
+		dialAddress,
+	)
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	config := c.tlsConfigs[address]
+	config.DialAddress = dialAddress
+
+	c.tlsConfigs[address] = config
+
+	// Transport lama mungkin masih memakai DialAddress lama.
+	delete(c.clients, address)
+}
+
+func (c *Client) ConfigureTLS(
+	address string,
+	config TLSConfig,
+) {
+	address = strings.TrimRight(
+		address,
+		"/",
+	)
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// Kalau sebelumnya sudah ada DialAddress dari discovery
+	// dan ConfigureTLS tidak memberikan DialAddress baru,
+	// pertahankan hasil discovery tersebut.
+	if config.DialAddress == "" {
+		if existing, exists := c.tlsConfigs[address]; exists {
+			config.DialAddress = existing.DialAddress
+		}
+	}
+
 	c.tlsConfigs[address] = config
 
 	// Buang HTTP client lama supaya transport dengan
-	// konfigurasi fingerprint lama tidak dipakai lagi.
+	// konfigurasi TLS/fingerprint/DialAddress lama
+	// tidak dipakai lagi.
 	delete(c.clients, address)
 }
 
 func (c *Client) ClearTLS(address string) {
-	address = strings.TrimRight(address, "/")
+	address = strings.TrimRight(
+		address,
+		"/",
+	)
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -238,11 +299,17 @@ func (c *Client) do(
 		requestBody = bytes.NewReader(nil)
 	}
 
-	address = strings.TrimRight(address, "/")
+	address = strings.TrimRight(
+		address,
+		"/",
+	)
 
 	requestURL := address +
 		"/" +
-		strings.TrimLeft(path, "/")
+		strings.TrimLeft(
+			path,
+			"/",
+		)
 
 	req, err := http.NewRequest(
 		method,
@@ -281,7 +348,9 @@ func (c *Client) do(
 		)
 	}
 
-	httpClient, err := c.httpClient(address)
+	httpClient, err := c.httpClient(
+		address,
+	)
 	if err != nil {
 		return err
 	}
@@ -358,6 +427,26 @@ func (c *Client) httpClient(
 		TLSClientConfig: tlsConfig,
 	}
 
+	if config.DialAddress != "" {
+		dialer := &net.Dialer{
+			Timeout: 3 * time.Second,
+		}
+
+		dialAddress := config.DialAddress
+
+		transport.DialContext = func(
+			ctx context.Context,
+			network string,
+			_ string,
+		) (net.Conn, error) {
+			return dialer.DialContext(
+				ctx,
+				network,
+				dialAddress,
+			)
+		}
+	}
+
 	client = &http.Client{
 		Timeout:   3 * time.Second,
 		Transport: transport,
@@ -372,7 +461,9 @@ func newTLSConfig(
 	address string,
 	config TLSConfig,
 ) (*tls.Config, error) {
-	parsedURL, err := url.Parse(address)
+	parsedURL, err := url.Parse(
+		address,
+	)
 	if err != nil {
 		return nil, fmt.Errorf(
 			"parse server address: %w",
@@ -395,6 +486,12 @@ func newTLSConfig(
 		// Trust dilakukan secara manual melalui VerifyConnection.
 		InsecureSkipVerify: true,
 
+		// Tetap gunakan hostname.
+		//
+		// Contoh:
+		//   archpc.local
+		//
+		// Jangan gunakan IP di sini.
 		ServerName: hostname,
 	}
 
@@ -426,19 +523,25 @@ func verifyTLSConnection(
 
 	now := time.Now()
 
-	if now.Before(certificate.NotBefore) {
+	if now.Before(
+		certificate.NotBefore,
+	) {
 		return fmt.Errorf(
 			"server TLS certificate is not valid yet",
 		)
 	}
 
-	if now.After(certificate.NotAfter) {
+	if now.After(
+		certificate.NotAfter,
+	) {
 		return fmt.Errorf(
 			"server TLS certificate has expired",
 		)
 	}
 
-	if err := certificate.VerifyHostname(hostname); err != nil {
+	if err := certificate.VerifyHostname(
+		hostname,
+	); err != nil {
 		return fmt.Errorf(
 			"server TLS certificate hostname verification failed: %w",
 			err,
@@ -510,7 +613,9 @@ func publicKeyFingerprint(
 func parseHTTPError(
 	resp *http.Response,
 ) error {
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(
+		resp.Body,
+	)
 	if err == nil {
 		message := strings.TrimSpace(
 			string(body),

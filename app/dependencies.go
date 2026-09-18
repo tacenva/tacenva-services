@@ -14,7 +14,6 @@ type Deps struct {
 	SqliteDB *gorm.DB
 	Client   *api.Client
 }
-
 type Context struct {
 	SelectedSoT *entity.SourceOfTruth
 	NodeDB      *database.DB

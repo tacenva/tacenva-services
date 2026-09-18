@@ -2,9 +2,13 @@ package app
 
 import (
 	"fmt"
+	"net"
+	"strconv"
+	"time"
 
 	"github.com/tacenva/database"
 	"github.com/tacenva/tacenva-services/api"
+	"github.com/tacenva/tacenva-services/internal/discovery"
 	coreapp "github.com/tacenva/tacpass-core/app"
 	"github.com/tacenva/tacpass-core/config"
 	"gorm.io/driver/sqlite"
@@ -35,7 +39,6 @@ func Setup(dev bool) (*Deps, error) {
 			err,
 		)
 	}
-	// defer sqlDB.Close()
 
 	if err := coreapp.Migrate(sqliteDB); err != nil {
 		return nil, err
@@ -43,14 +46,55 @@ func Setup(dev bool) (*Deps, error) {
 
 	client := api.NewClient()
 
-	deps := Deps{
+	deps := &Deps{
 		Config:   cfg,
 		AppDB:    tacenvaDB,
 		SqliteDB: sqliteDB,
 		Client:   client,
 	}
 
-	return &deps, nil
+	// Discovery tidak lagi memblok startup.
+	go discoverServers(client)
+
+	return deps, nil
+}
+
+func discoverServers(
+	client *api.Client,
+) {
+	servers, err := discovery.Discover(
+		3 * time.Second,
+	)
+	if err != nil {
+		fmt.Printf(
+			"mDNS discovery failed: %v\n",
+			err,
+		)
+		return
+	}
+
+	for _, server := range servers {
+		address := "https://" + net.JoinHostPort(
+			server.Host,
+			strconv.Itoa(server.Port),
+		)
+
+		dialAddress := net.JoinHostPort(
+			server.IP.String(),
+			strconv.Itoa(server.Port),
+		)
+
+		client.ConfigureDialAddress(
+			address,
+			dialAddress,
+		)
+
+		fmt.Printf(
+			"mDNS endpoint: address=%q dial=%q\n",
+			address,
+			dialAddress,
+		)
+	}
 }
 
 func openSQLite(

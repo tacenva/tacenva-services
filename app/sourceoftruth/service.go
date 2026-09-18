@@ -4,11 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
 	"net"
 	"net/url"
 	"os"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -111,37 +109,6 @@ func (s *Service) Access(
 	}
 
 	return nil
-}
-
-func findVaultDirectories(root string) ([]string, error) {
-	var result []string
-
-	err := filepath.WalkDir(root, func(
-		path string,
-		entry fs.DirEntry,
-		err error,
-	) error {
-		if err != nil {
-			return err
-		}
-
-		if entry.IsDir() {
-			return nil
-		}
-
-		if entry.Name() != "vault.tacenva" {
-			return nil
-		}
-
-		result = append(result, filepath.Dir(path))
-		return nil
-	})
-
-	if err != nil {
-		return nil, err
-	}
-
-	return result, nil
 }
 
 func (s *Service) ChangePassword(
