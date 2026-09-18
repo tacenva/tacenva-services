@@ -200,7 +200,7 @@ func (s *remoteService) Sync() (
 
 	changeIDs := make([]string, 0, len(changes))
 
-	for i, change := range changes {
+	for _, change := range changes {
 		if change.SyncChange.ID == "" {
 			return vaultAccessList, errors.New(
 				"vault sync change has empty id",
