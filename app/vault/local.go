@@ -9,26 +9,30 @@ import (
 	"github.com/tacenva/tacpass-core/config"
 	coreEntity "github.com/tacenva/tacpass-core/entity"
 	vaultCore "github.com/tacenva/tacpass-core/vault"
+	vaultrecordCore "github.com/tacenva/tacpass-core/vaultrecord"
 )
 
 type localService struct {
-	appDeps      *app.Deps
-	context      *app.Context
-	vaultService *vaultCore.Service
-	authService  *auth.Service
+	appDeps            *app.Deps
+	context            *app.Context
+	vaultService       *vaultCore.Service
+	vaultrecordService *vaultrecordCore.Service
+	authService        *auth.Service
 }
 
 func NewLocalService(
 	appDeps *app.Deps,
 	context *app.Context,
 	vaultService *vaultCore.Service,
+	vaultrecordService *vaultrecordCore.Service,
 	authService *auth.Service,
 ) *localService {
 	return &localService{
-		appDeps:      appDeps,
-		context:      context,
-		vaultService: vaultService,
-		authService:  authService,
+		appDeps:            appDeps,
+		context:            context,
+		vaultService:       vaultService,
+		vaultrecordService: vaultrecordService,
+		authService:        authService,
 	}
 }
 
@@ -64,8 +68,15 @@ func (s *localService) CreateVault(
 		return nil, err
 	}
 
+	vaultDir := s.appDeps.Config.Path(
+		"node",
+		s.context.SelectedSoT.ID,
+		"vault",
+	)
+
 	vaultAccess, err := s.vaultService.Create(
 		authUser,
+		vaultDir,
 		vaultName,
 	)
 	if err != nil {
@@ -117,8 +128,15 @@ func (s *localService) DeleteVault(
 		return err
 	}
 
+	vaultDir := s.appDeps.Config.Path(
+		"node",
+		s.context.SelectedSoT.ID,
+		"vault",
+	)
+
 	return s.vaultService.Delete(
 		authUser,
+		vaultDir,
 		vault.ID,
 	)
 }
@@ -135,36 +153,72 @@ func (s *localService) OpenVaultFile(
 }
 
 func (s *localService) AppendRecord(
-	vaultFile *database.DatabaseFile,
+	vaultAccess *coreEntity.VaultAccess,
 	record *coreEntity.VaultRecord,
-) (*coreEntity.VaultRecord, error) {
-	recordID, err := vaultFile.Insert(record)
+) (string, error) {
+	vaultKey, err := s.unwrapVaultKey(vaultAccess)
 	if err != nil {
-		return nil, err
+		return "", nil
 	}
 
-	record.ID = recordID
+	vaultDir := s.appDeps.Config.Path(
+		"node",
+		s.context.SelectedSoT.ID,
+		"vault",
+	)
 
-	return record, nil
+	authUser, err := s.authUser()
+	if err != nil {
+		return "", err
+	}
+
+	return s.vaultrecordService.Create(authUser, vaultDir, vaultKey, vaultAccess.VaultID, record)
 }
 
 func (s *localService) UpdateRecord(
-	vaultFile *database.DatabaseFile,
+	vaultAccess *coreEntity.VaultAccess,
 	record *coreEntity.VaultRecord,
-) (*coreEntity.VaultRecord, error) {
-	if err := vaultFile.Update(record); err != nil {
-		return nil, err
+) error {
+	vaultKey, err := s.unwrapVaultKey(vaultAccess)
+	if err != nil {
+		return nil
 	}
 
-	return record, nil
+	vaultDir := s.appDeps.Config.Path(
+		"node",
+		s.context.SelectedSoT.ID,
+		"vault",
+	)
+
+	authUser, err := s.authUser()
+	if err != nil {
+		return err
+	}
+
+	return s.vaultrecordService.Update(authUser, vaultDir, vaultKey, vaultAccess.VaultID, record)
 }
 
 func (s *localService) DeleteRecord(
-	vaultFile *database.DatabaseFile,
-	recordID string,
+	vaultAccess *coreEntity.VaultAccess,
+	record *coreEntity.VaultRecord,
 ) error {
-	_, err := vaultFile.Delete(recordID)
-	return err
+	vaultKey, err := s.unwrapVaultKey(vaultAccess)
+	if err != nil {
+		return nil
+	}
+
+	vaultDir := s.appDeps.Config.Path(
+		"node",
+		s.context.SelectedSoT.ID,
+		"vault",
+	)
+
+	authUser, err := s.authUser()
+	if err != nil {
+		return err
+	}
+
+	return s.vaultrecordService.Delete(authUser, vaultDir, vaultKey, vaultAccess.VaultID, record.ID)
 }
 
 func (s *localService) database() *database.DB {
@@ -175,4 +229,13 @@ func (s *localService) database() *database.DB {
 			"vault",
 		),
 	)
+}
+
+func (s *localService) unwrapVaultKey(
+	vaultAccess *coreEntity.VaultAccess,
+) (string, error) {
+	vaultKey, err := s.context.SelectedSoT.KeyPair.Open(
+		vaultAccess.VaultKey,
+	)
+	return string(vaultKey), err
 }

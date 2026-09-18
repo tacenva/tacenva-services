@@ -245,27 +245,6 @@ func (s *remoteService) Sync() (
 				return vaultAccessList, err
 			}
 
-			// var foundVaultAccess []coreEntity.VaultAccess
-
-			// if err := vaultFile.FindWhere(
-			// 	&foundVaultAccess,
-			// 	func(data map[string]any) bool {
-			// 		vaultID, ok := data["vault_id"]
-
-			// 		return ok && vaultID == change.SyncChange.EntityID
-			// 	},
-			// ); err != nil {
-			// 	return vaultAccessList, err
-			// }
-
-			// for _, vaultAccess := range foundVaultAccess {
-			// 	if _, err := vaultFile.Delete(
-			// 		vaultAccess.ID,
-			// 	); err != nil {
-			// 		return vaultAccessList, err
-			// 	}
-			// }
-
 		default:
 			return vaultAccessList, fmt.Errorf(
 				"unknown vault sync operation %q",
@@ -444,49 +423,6 @@ func (s *remoteService) DeleteVault(
 	}
 
 	return s.deleteVault(vault.ID)
-
-	// vaultFile, err := s.database().File(
-	// 	"vault",
-	// 	s.masterKey,
-	// 	database.FileModeOpen,
-	// )
-	// if err != nil {
-	// 	return err
-	// }
-
-	// var vaultAccessList []coreEntity.VaultAccess
-
-	// if err := vaultFile.FindWhere(
-	// 	&vaultAccessList,
-	// 	func(data map[string]any) bool {
-	// 		vaultID, ok := data["vault_id"]
-
-	// 		return ok && vaultID == vault.ID
-	// 	},
-	// ); err != nil {
-	// 	return err
-	// }
-
-	// if len(vaultAccessList) == 0 {
-	// 	return errors.New("vault access not found")
-	// }
-
-	// for _, vaultAccess := range vaultAccessList {
-	// 	if _, err := vaultFile.Delete(
-	// 		vaultAccess.ID,
-	// 	); err != nil {
-	// 		return err
-	// 	}
-	// }
-
-	// err = s.database().Destroy(
-	// 	vault.ID,
-	// )
-
-	// if err != nil && errors.Is(err, database.ErrFileNotFound) {
-	// 	return nil
-	// }
-	// return err
 }
 
 func (s *remoteService) NeedSyncRecords(
@@ -521,11 +457,10 @@ type recordChange struct {
 
 func (s *remoteService) SyncRecords(
 	vaultID string,
+	vaultKey string,
 ) ([]coreEntity.VaultRecord, error) {
-	vaultFile, err := s.database().File(
+	vaultRawFile, err := s.database().NewRawFile(
 		vaultID,
-		s.masterKey,
-		database.FileModeOpenOrCreate,
 	)
 	if err != nil {
 		return nil, err
@@ -558,7 +493,8 @@ func (s *remoteService) SyncRecords(
 				)
 			}
 
-			if _, err := vaultFile.InsertRaw(
+			if _, err := vaultRawFile.InsertRaw(
+				change.SyncChange.EntityID,
 				change.Record,
 			); err != nil {
 				return nil, err
@@ -571,7 +507,7 @@ func (s *remoteService) SyncRecords(
 				)
 			}
 
-			if err := vaultFile.UpdateRaw(
+			if err := vaultRawFile.UpdateRaw(
 				change.SyncChange.EntityID,
 				change.Record,
 			); err != nil {
@@ -585,7 +521,7 @@ func (s *remoteService) SyncRecords(
 				)
 			}
 
-			if _, err := vaultFile.Delete(
+			if err := vaultRawFile.DeleteRaw(
 				change.SyncChange.EntityID,
 			); err != nil {
 				return nil, err
@@ -612,6 +548,15 @@ func (s *remoteService) SyncRecords(
 		); err != nil {
 			return nil, err
 		}
+	}
+
+	vaultFile, err := s.database().File(
+		vaultID,
+		vaultKey,
+		database.FileModeOpen,
+	)
+	if err != nil {
+		return nil, err
 	}
 
 	var vaultRecords []coreEntity.VaultRecord

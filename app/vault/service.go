@@ -11,6 +11,7 @@ import (
 	"github.com/tacenva/tacpass-core/auth"
 	coreEntity "github.com/tacenva/tacpass-core/entity"
 	vaultCore "github.com/tacenva/tacpass-core/vault"
+	vaultrecordCore "github.com/tacenva/tacpass-core/vaultrecord"
 )
 
 var (
@@ -22,7 +23,7 @@ type Service struct {
 	masterKey string
 
 	local  *localService
-	Remote *remoteService
+	remote *remoteService
 }
 
 func NewService(
@@ -30,6 +31,7 @@ func NewService(
 	context *app.Context,
 	masterKey string,
 	vaultService *vaultCore.Service,
+	vaultrecordService *vaultrecordCore.Service,
 	authService *auth.Service,
 	sotService *sourceoftruth.Service,
 ) *Service {
@@ -41,10 +43,11 @@ func NewService(
 			appDeps,
 			context,
 			vaultService,
+			vaultrecordService,
 			authService,
 		),
 
-		Remote: NewRemoteService(
+		remote: NewRemoteService(
 			appDeps,
 			context,
 			masterKey,
@@ -75,10 +78,10 @@ func (s *Service) List() ([]coreEntity.VaultAccess, bool, error) {
 
 	switch s.context.SelectedSoT.SyncMode {
 	case operationsEntity.SyncModeManual:
-		return s.Remote.NeedSync()
+		return s.remote.NeedSync()
 
 	case operationsEntity.SyncModeAuto:
-		vaultAccessList, err := s.Remote.Sync()
+		vaultAccessList, err := s.remote.Sync()
 		if err != nil {
 			return vaultAccessList, false, err
 		}
@@ -104,7 +107,7 @@ func (s *Service) CreateVault(
 	}
 
 	if s.context.IsRemote {
-		return s.Remote.CreateVault(vaultName)
+		return s.remote.CreateVault(vaultName)
 	}
 
 	return s.local.CreateVault(vaultName)
@@ -136,7 +139,7 @@ func (s *Service) UpdateVault(
 	}
 
 	if s.context.IsRemote {
-		return s.Remote.UpdateVault(vault)
+		return s.remote.UpdateVault(vault)
 	}
 
 	return s.local.UpdateVault(vault)
@@ -164,7 +167,7 @@ func (s *Service) DeleteVault(
 	}
 
 	if s.context.IsRemote {
-		return s.Remote.DeleteVault(vault)
+		return s.remote.DeleteVault(vault)
 	}
 
 	return s.local.DeleteVault(vault)
@@ -205,7 +208,7 @@ func (s *Service) ListRecords(
 	var vaultFile *database.DatabaseFile
 
 	if s.context.IsRemote {
-		vaultFile, err = s.Remote.EnsureVaultFile(
+		vaultFile, err = s.remote.EnsureVaultFile(
 			vaultAccess.VaultID,
 			string(vaultKey),
 		)
@@ -232,7 +235,7 @@ func (s *Service) ListRecords(
 
 	switch s.context.SelectedSoT.SyncMode {
 	case operationsEntity.SyncModeManual:
-		needSync, err := s.Remote.NeedSyncRecords(
+		needSync, err := s.remote.NeedSyncRecords(
 			vaultAccess.VaultID,
 		)
 		if err != nil {
@@ -242,7 +245,7 @@ func (s *Service) ListRecords(
 		return vaultRecords, needSync, nil
 
 	case operationsEntity.SyncModeAuto:
-		needSync, err := s.Remote.NeedSyncRecords(
+		needSync, err := s.remote.NeedSyncRecords(
 			vaultAccess.VaultID,
 		)
 		if err != nil {
@@ -253,8 +256,9 @@ func (s *Service) ListRecords(
 			return vaultRecords, false, nil
 		}
 
-		vaultRecords, err = s.Remote.SyncRecords(
+		vaultRecords, err = s.remote.SyncRecords(
 			vaultAccess.VaultID,
+			string(vaultKey),
 		)
 		if err != nil {
 			return vaultRecords, false, err
@@ -265,6 +269,26 @@ func (s *Service) ListRecords(
 	default:
 		return vaultRecords, false, nil
 	}
+}
+
+func (s *Service) SyncRecords(
+	vaultAccess *coreEntity.VaultAccess,
+) ([]coreEntity.VaultRecord, error) {
+	vaultKey, err := s.context.SelectedSoT.KeyPair.Open(
+		vaultAccess.VaultKey,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.remote.SyncRecords(
+		vaultAccess.VaultID,
+		string(vaultKey),
+	)
+}
+
+func (s *Service) Sync() ([]coreEntity.VaultAccess, error) {
+	return s.remote.Sync()
 }
 
 func (s *Service) AppendRecord(
@@ -310,17 +334,17 @@ func (s *Service) AppendRecord(
 	}
 
 	if s.context.IsRemote {
-		return s.Remote.AppendRecord(
+		return s.remote.AppendRecord(
 			vaultAccess.VaultID,
 			record,
 			[]byte(encrypted),
 		)
 	}
 
-	return s.local.AppendRecord(
-		vaultFile,
-		record,
-	)
+	newID, err := s.local.AppendRecord(vaultAccess, record)
+	record.ID = newID
+
+	return record, err
 }
 
 func (s *Service) UpdateRecord(
@@ -372,17 +396,14 @@ func (s *Service) UpdateRecord(
 	}
 
 	if s.context.IsRemote {
-		return s.Remote.UpdateRecord(
+		return s.remote.UpdateRecord(
 			vaultAccess.VaultID,
 			record,
 			[]byte(encrypted),
 		)
 	}
 
-	return s.local.UpdateRecord(
-		vaultFile,
-		record,
-	)
+	return record, s.local.UpdateRecord(vaultAccess, record)
 }
 
 func (s *Service) DeleteRecord(
@@ -424,7 +445,7 @@ func (s *Service) DeleteRecord(
 	}
 
 	if s.context.IsRemote {
-		if err := s.Remote.DeleteRecord(
+		if err := s.remote.DeleteRecord(
 			vaultAccess.VaultID,
 			record.ID,
 		); err != nil {
@@ -432,15 +453,7 @@ func (s *Service) DeleteRecord(
 		}
 	}
 
-	vaultFile, err := s.openVaultFile(vaultAccess)
-	if err != nil {
-		return err
-	}
-
-	return s.local.DeleteRecord(
-		vaultFile,
-		record.ID,
-	)
+	return s.local.DeleteRecord(vaultAccess, record)
 }
 
 func (s *Service) openVaultFile(
@@ -454,7 +467,7 @@ func (s *Service) openVaultFile(
 	}
 
 	if s.context.IsRemote {
-		return s.Remote.EnsureVaultFile(
+		return s.remote.EnsureVaultFile(
 			vaultAccess.VaultID,
 			string(vaultKey),
 		)
