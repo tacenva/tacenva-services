@@ -486,12 +486,12 @@ func newTLSConfig(
 		// Trust dilakukan secara manual melalui VerifyConnection.
 		InsecureSkipVerify: true,
 
-		// Tetap gunakan hostname.
+		// Tetap gunakan hostname logical server.
 		//
 		// Contoh:
 		//   archpc.local
 		//
-		// Jangan gunakan IP di sini.
+		// Jangan gunakan IP hasil discovery di sini.
 		ServerName: hostname,
 	}
 
@@ -558,6 +558,11 @@ func verifyTLSConnection(
 		)
 	}
 
+	// Tidak ada fingerprint yang tersimpan.
+	//
+	// Ini adalah TOFU:
+	// certificate tetap diverifikasi masa berlaku dan hostname-nya,
+	// kemudian public key fingerprint dipercaya dan disimpan.
 	if config.Fingerprint == "" {
 		if config.OnFirstTrust == nil {
 			return errors.New(
@@ -577,6 +582,8 @@ func verifyTLSConnection(
 		return nil
 	}
 
+	// Fingerprint sudah tersimpan.
+	// Server harus menggunakan public key yang sama.
 	if !strings.EqualFold(
 		config.Fingerprint,
 		fingerprint,

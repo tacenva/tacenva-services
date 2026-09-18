@@ -123,7 +123,10 @@ func (s *Service) ChangePassword(
 	}
 
 	var sotList []entity.SourceOfTruth
-	if err := s.sotFile.FindAll(&sotList); err != nil {
+
+	if err := s.sotFile.FindAll(
+		&sotList,
+	); err != nil {
 		return err
 	}
 
@@ -142,7 +145,10 @@ func (s *Service) ChangePassword(
 			database.FileModeOpen,
 		)
 		if err != nil {
-			if errors.Is(err, database.ErrFileNotFound) {
+			if errors.Is(
+				err,
+				database.ErrFileNotFound,
+			) {
 				continue
 			}
 
@@ -156,6 +162,7 @@ func (s *Service) ChangePassword(
 			newPassword,
 		); err != nil {
 			fmt.Print(err)
+
 			return err
 		}
 	}
@@ -181,7 +188,12 @@ func normalizeAddress(address string) string {
 	}
 
 	if u.Port() == "" {
-		u.Host = net.JoinHostPort(u.Hostname(), strconv.Itoa(config.DefaultPort))
+		u.Host = net.JoinHostPort(
+			u.Hostname(),
+			strconv.Itoa(
+				config.DefaultPort,
+			),
+		)
 	}
 
 	return u.String()
@@ -210,10 +222,12 @@ func (s *Service) Create(
 		address,
 		api.TLSConfig{
 			Fingerprint: "",
+
 			OnFirstTrust: func(
 				newFingerprint string,
 			) error {
 				fingerprint = newFingerprint
+
 				return nil
 			},
 		},
@@ -231,6 +245,7 @@ func (s *Service) Create(
 	}
 
 	sotHostname := response.SoTHostname
+
 	if hostnameAlias != "" {
 		sotHostname = hostnameAlias
 	}
@@ -255,8 +270,70 @@ func (s *Service) Update(
 		return ErrForbidden
 	}
 
-	updatedSoT.Address = normalizeAddress(updatedSoT.Address)
-	return s.sotFile.Update(updatedSoT)
+	if updatedSoT == nil {
+		return errors.New(
+			"source of truth cannot be nil",
+		)
+	}
+
+	updatedSoT.Address = normalizeAddress(
+		updatedSoT.Address,
+	)
+
+	return s.sotFile.Update(
+		updatedSoT,
+	)
+}
+
+// ResetTLSFingerprint menghapus fingerprint TLS yang tersimpan
+// pada Source of Truth.
+//
+// Setelah fingerprint dikosongkan, request HTTPS berikutnya akan
+// menggunakan mekanisme TOFU melalui OnFirstTrust dan fingerprint
+// baru akan disimpan kembali oleh caller.
+//
+// Method ini sengaja berada di SourceOfTruth Service karena
+// fingerprint merupakan bagian dari persisted SoT state, bukan
+// sekadar state sementara milik HTTP client.
+func (s *Service) ResetTLSFingerprint(
+	sot *entity.SourceOfTruth,
+) error {
+	if s.sotFile == nil {
+		return ErrForbidden
+	}
+
+	if sot == nil {
+		return errors.New(
+			"source of truth cannot be nil",
+		)
+	}
+
+	// Hapus fingerprint lama dari persisted SoT.
+	sot.TLSFingerprint = ""
+
+	// Persist state baru.
+	if err := s.Update(sot); err != nil {
+		return err
+	}
+
+	// Reset TLS state di API client juga.
+	s.appDeps.Client.ConfigureTLS(
+		sot.Address,
+		api.TLSConfig{
+			Fingerprint: "",
+
+			OnFirstTrust: func(
+				fingerprint string,
+			) error {
+				// Simpan fingerprint baru.
+				sot.TLSFingerprint = fingerprint
+
+				return s.Update(sot)
+			},
+		},
+	)
+
+	return nil
 }
 
 func (s *Service) Get(
@@ -279,28 +356,39 @@ func (s *Service) Get(
 	return &sotData, nil
 }
 
-func (s *Service) List() ([]entity.SourceOfTruth, error) {
+func (s *Service) List() (
+	[]entity.SourceOfTruth,
+	error,
+) {
 	if s.sotFile == nil {
 		return nil, ErrForbidden
 	}
 
 	var sotData []entity.SourceOfTruth
 
-	if err := s.sotFile.FindAll(&sotData); err != nil {
+	if err := s.sotFile.FindAll(
+		&sotData,
+	); err != nil {
 		return nil, err
 	}
 
-	sort.Slice(sotData, func(i, j int) bool {
-		iLocal := sotData[i].Address == "localhost"
-		jLocal := sotData[j].Address == "localhost"
+	sort.Slice(
+		sotData,
+		func(i, j int) bool {
+			iLocal := sotData[i].Address == "localhost"
+			jLocal := sotData[j].Address == "localhost"
 
-		if iLocal != jLocal {
-			return iLocal
-		}
+			if iLocal != jLocal {
+				return iLocal
+			}
 
-		return strings.ToLower(sotData[i].Hostname) <
-			strings.ToLower(sotData[j].Hostname)
-	})
+			return strings.ToLower(
+				sotData[i].Hostname,
+			) < strings.ToLower(
+				sotData[j].Hostname,
+			)
+		},
+	)
 
 	return sotData, nil
 }
@@ -313,30 +401,46 @@ func (s *Service) Del(
 	}
 
 	if sot == nil {
-		return nil, errors.New("source of truth cannot be nil")
+		return nil, errors.New(
+			"source of truth cannot be nil",
+		)
 	}
 
 	if sot.ID == "" {
-		return nil, errors.New("source of truth id cannot be empty")
+		return nil, errors.New(
+			"source of truth id cannot be empty",
+		)
 	}
 
 	var stored entity.SourceOfTruth
-	err := s.sotFile.Find(sot.ID, &stored)
+
+	err := s.sotFile.Find(
+		sot.ID,
+		&stored,
+	)
 	if err != nil {
 		return nil, err
 	}
 
 	if stored.Address == "localhost" {
-		return nil, errors.New("deleting localhost is prohibited")
+		return nil, errors.New(
+			"deleting localhost is prohibited",
+		)
 	}
 
-	oldData, err := s.sotFile.Delete(stored.ID)
+	oldData, err := s.sotFile.Delete(
+		stored.ID,
+	)
 	if err != nil {
 		return nil, err
 	}
 
 	var deleted entity.SourceOfTruth
-	if err := json.Unmarshal(oldData, &deleted); err != nil {
+
+	if err := json.Unmarshal(
+		oldData,
+		&deleted,
+	); err != nil {
 		return nil, err
 	}
 
