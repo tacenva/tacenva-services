@@ -241,26 +241,30 @@ func (s *remoteService) Sync() (
 				)
 			}
 
-			var foundVaultAccess []coreEntity.VaultAccess
-
-			if err := vaultFile.FindWhere(
-				&foundVaultAccess,
-				func(data map[string]any) bool {
-					vaultID, ok := data["vault_id"]
-
-					return ok && vaultID == change.SyncChange.EntityID
-				},
-			); err != nil {
+			if err := s.deleteVault(change.SyncChange.EntityID); err != nil {
 				return vaultAccessList, err
 			}
 
-			for _, vaultAccess := range foundVaultAccess {
-				if _, err := vaultFile.Delete(
-					vaultAccess.ID,
-				); err != nil {
-					return vaultAccessList, err
-				}
-			}
+			// var foundVaultAccess []coreEntity.VaultAccess
+
+			// if err := vaultFile.FindWhere(
+			// 	&foundVaultAccess,
+			// 	func(data map[string]any) bool {
+			// 		vaultID, ok := data["vault_id"]
+
+			// 		return ok && vaultID == change.SyncChange.EntityID
+			// 	},
+			// ); err != nil {
+			// 	return vaultAccessList, err
+			// }
+
+			// for _, vaultAccess := range foundVaultAccess {
+			// 	if _, err := vaultFile.Delete(
+			// 		vaultAccess.ID,
+			// 	); err != nil {
+			// 		return vaultAccessList, err
+			// 	}
+			// }
 
 		default:
 			return vaultAccessList, fmt.Errorf(
@@ -384,16 +388,9 @@ func (s *remoteService) UpdateVault(
 	)
 }
 
-func (s *remoteService) DeleteVault(
-	vault *coreEntity.Vault,
+func (s *remoteService) deleteVault(
+	vaultID string,
 ) error {
-	if err := s.appDeps.Client.DeleteVault(
-		s.context.SelectedSoT.Address,
-		vault.ID,
-	); err != nil {
-		return err
-	}
-
 	vaultFile, err := s.database().File(
 		"vault",
 		s.masterKey,
@@ -408,9 +405,9 @@ func (s *remoteService) DeleteVault(
 	if err := vaultFile.FindWhere(
 		&vaultAccessList,
 		func(data map[string]any) bool {
-			vaultID, ok := data["vault_id"]
+			localVaultID, ok := data["vault_id"]
 
-			return ok && vaultID == vault.ID
+			return ok && localVaultID == vaultID
 		},
 	); err != nil {
 		return err
@@ -428,9 +425,68 @@ func (s *remoteService) DeleteVault(
 		}
 	}
 
-	return s.database().Destroy(
+	err = s.database().Destroy(vaultID)
+	if err != nil && errors.Is(err, database.ErrFileNotFound) {
+		return nil
+	}
+
+	return err
+}
+
+func (s *remoteService) DeleteVault(
+	vault *coreEntity.Vault,
+) error {
+	if err := s.appDeps.Client.DeleteVault(
+		s.context.SelectedSoT.Address,
 		vault.ID,
-	)
+	); err != nil {
+		return err
+	}
+
+	return s.deleteVault(vault.ID)
+
+	// vaultFile, err := s.database().File(
+	// 	"vault",
+	// 	s.masterKey,
+	// 	database.FileModeOpen,
+	// )
+	// if err != nil {
+	// 	return err
+	// }
+
+	// var vaultAccessList []coreEntity.VaultAccess
+
+	// if err := vaultFile.FindWhere(
+	// 	&vaultAccessList,
+	// 	func(data map[string]any) bool {
+	// 		vaultID, ok := data["vault_id"]
+
+	// 		return ok && vaultID == vault.ID
+	// 	},
+	// ); err != nil {
+	// 	return err
+	// }
+
+	// if len(vaultAccessList) == 0 {
+	// 	return errors.New("vault access not found")
+	// }
+
+	// for _, vaultAccess := range vaultAccessList {
+	// 	if _, err := vaultFile.Delete(
+	// 		vaultAccess.ID,
+	// 	); err != nil {
+	// 		return err
+	// 	}
+	// }
+
+	// err = s.database().Destroy(
+	// 	vault.ID,
+	// )
+
+	// if err != nil && errors.Is(err, database.ErrFileNotFound) {
+	// 	return nil
+	// }
+	// return err
 }
 
 func (s *remoteService) NeedSyncRecords(
