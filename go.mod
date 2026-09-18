@@ -3,8 +3,8 @@ module github.com/tacenva/tacenva-services
 go 1.26.5
 
 require (
-	github.com/tacenva/database v1.0.0-alpha.3
-	github.com/tacenva/tacpass-core v1.0.0-alpha.2
+	github.com/tacenva/database v1.0.0-alpha.4
+	github.com/tacenva/tacpass-core v1.0.0-alpha.3
 	gorm.io/driver/sqlite v1.6.0
 	gorm.io/gorm v1.31.2
 )
