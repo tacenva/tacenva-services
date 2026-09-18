@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/tacenva/database"
@@ -213,7 +214,7 @@ func normalizeAddress(address string) string {
 	}
 
 	if u.Port() == "" {
-		u.Host = net.JoinHostPort(u.Hostname(), string(config.DefaultPort))
+		u.Host = net.JoinHostPort(u.Hostname(), strconv.Itoa(config.DefaultPort))
 	}
 
 	return u.String()

@@ -57,7 +57,7 @@ func openSQLite(
 	path string,
 ) (*gorm.DB, error) {
 	db, err := gorm.Open(
-		sqlite.Open(path),
+		sqlite.Open(path+"?_foreign_keys=on"),
 		&gorm.Config{},
 	)
 	if err != nil {

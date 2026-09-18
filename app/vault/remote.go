@@ -161,7 +161,7 @@ type vaultChange struct {
 		Operation string `json:"operation"`
 	} `json:"sync_change"`
 
-	Vault *coreEntity.VaultAccess `json:"vault,omitempty"`
+	VaultAccess *coreEntity.VaultAccess `json:"vault_access,omitempty"`
 }
 
 func (s *remoteService) Sync() (
@@ -200,30 +200,36 @@ func (s *remoteService) Sync() (
 
 	changeIDs := make([]string, 0, len(changes))
 
-	for _, change := range changes {
+	for i, change := range changes {
+		if change.SyncChange.ID == "" {
+			return vaultAccessList, errors.New(
+				"vault sync change has empty id",
+			)
+		}
+
 		switch change.SyncChange.Operation {
 		case "create":
-			if change.Vault == nil {
+			if change.VaultAccess == nil {
 				return vaultAccessList, errors.New(
-					"create vault change has empty vault",
+					"create vault change has empty vault access",
 				)
 			}
 
 			if _, err := vaultFile.Insert(
-				change.Vault,
+				change.VaultAccess,
 			); err != nil {
 				return vaultAccessList, err
 			}
 
 		case "update":
-			if change.Vault == nil {
+			if change.VaultAccess == nil {
 				return vaultAccessList, errors.New(
-					"update vault change has empty vault",
+					"update vault change has empty vault access",
 				)
 			}
 
 			if err := vaultFile.Update(
-				change.Vault,
+				change.VaultAccess,
 			); err != nil {
 				return vaultAccessList, err
 			}
@@ -235,22 +241,31 @@ func (s *remoteService) Sync() (
 				)
 			}
 
-			if _, err := vaultFile.Delete(
-				change.SyncChange.EntityID,
+			var foundVaultAccess []coreEntity.VaultAccess
+
+			if err := vaultFile.FindWhere(
+				&foundVaultAccess,
+				func(data map[string]any) bool {
+					vaultID, ok := data["vault_id"]
+
+					return ok && vaultID == change.SyncChange.EntityID
+				},
 			); err != nil {
 				return vaultAccessList, err
+			}
+
+			for _, vaultAccess := range foundVaultAccess {
+				if _, err := vaultFile.Delete(
+					vaultAccess.ID,
+				); err != nil {
+					return vaultAccessList, err
+				}
 			}
 
 		default:
 			return vaultAccessList, fmt.Errorf(
 				"unknown vault sync operation %q",
 				change.SyncChange.Operation,
-			)
-		}
-
-		if change.SyncChange.ID == "" {
-			return vaultAccessList, errors.New(
-				"vault sync change has empty id",
 			)
 		}
 
@@ -405,13 +420,15 @@ func (s *remoteService) DeleteVault(
 		return errors.New("vault access not found")
 	}
 
-	if _, err := vaultFile.Delete(
-		vaultAccessList[0].ID,
-	); err != nil {
-		return err
+	for _, vaultAccess := range vaultAccessList {
+		if _, err := vaultFile.Delete(
+			vaultAccess.ID,
+		); err != nil {
+			return err
+		}
 	}
 
-	return s.database().Delete(
+	return s.database().Destroy(
 		vault.ID,
 	)
 }
@@ -471,6 +488,12 @@ func (s *remoteService) SyncRecords(
 	changeIDs := make([]string, 0, len(changes))
 
 	for _, change := range changes {
+		if change.SyncChange.ID == "" {
+			return nil, errors.New(
+				"record sync change has empty id",
+			)
+		}
+
 		switch change.SyncChange.Operation {
 		case "create":
 			if len(change.Record) == 0 {
@@ -516,12 +539,6 @@ func (s *remoteService) SyncRecords(
 			return nil, fmt.Errorf(
 				"unknown record sync operation %q",
 				change.SyncChange.Operation,
-			)
-		}
-
-		if change.SyncChange.ID == "" {
-			return nil, errors.New(
-				"record sync change has empty id",
 			)
 		}
 
