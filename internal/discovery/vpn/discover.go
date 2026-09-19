@@ -40,14 +40,6 @@ func (d *Discoverer) Discover(
 		d.Workers = 32
 	}
 
-	fmt.Printf(
-		"[VPN] discovery started: interface=%s port=%d workers=%d timeout=%s\n",
-		d.InterfaceName,
-		d.Port,
-		d.Workers,
-		timeout,
-	)
-
 	iface, err := net.InterfaceByName(d.InterfaceName)
 	if err != nil {
 		return nil, fmt.Errorf(
@@ -56,13 +48,6 @@ func (d *Discoverer) Discover(
 			err,
 		)
 	}
-
-	fmt.Printf(
-		"[VPN] interface found: name=%s index=%d flags=%s\n",
-		iface.Name,
-		iface.Index,
-		iface.Flags,
-	)
 
 	if iface.Flags&net.FlagUp == 0 {
 		return nil, fmt.Errorf(
@@ -74,18 +59,6 @@ func (d *Discoverer) Discover(
 	subnets, err := ipv4Subnets(iface)
 	if err != nil {
 		return nil, err
-	}
-
-	fmt.Printf(
-		"[VPN] found %d IPv4 subnet(s)\n",
-		len(subnets),
-	)
-
-	for _, subnet := range subnets {
-		fmt.Printf(
-			"[VPN] subnet: %s\n",
-			subnet.String(),
-		)
 	}
 
 	if len(subnets) == 0 {
@@ -103,11 +76,6 @@ func (d *Discoverer) Discover(
 		)
 	}
 
-	fmt.Printf(
-		"[VPN] request encoded: %s\n",
-		string(request),
-	)
-
 	ctx, cancel := context.WithTimeout(
 		context.Background(),
 		timeout,
@@ -121,19 +89,8 @@ func (d *Discoverer) Discover(
 	for _, subnet := range subnets {
 		hosts, err := subnetHosts(subnet)
 		if err != nil {
-			fmt.Printf(
-				"[VPN] skip subnet %s: %v\n",
-				subnet.String(),
-				err,
-			)
 			continue
 		}
-
-		fmt.Printf(
-			"[VPN] subnet %s has %d host(s) to scan\n",
-			subnet.String(),
-			len(hosts),
-		)
 
 		if len(hosts) == 0 {
 			continue
@@ -146,15 +103,7 @@ func (d *Discoverer) Discover(
 			workerCount = len(hosts)
 		}
 
-		fmt.Printf(
-			"[VPN] starting %d worker(s) for subnet %s\n",
-			workerCount,
-			subnet.String(),
-		)
-
 		for i := 0; i < workerCount; i++ {
-			workerID := i + 1
-
 			workers.Add(1)
 
 			go func() {
@@ -170,13 +119,6 @@ func (d *Discoverer) Discover(
 							return
 						}
 
-						fmt.Printf(
-							"[VPN][worker-%d] querying %s:%d\n",
-							workerID,
-							ip.String(),
-							d.Port,
-						)
-
 						server, ok := query(
 							ctx,
 							ip,
@@ -187,14 +129,6 @@ func (d *Discoverer) Discover(
 						if !ok {
 							continue
 						}
-
-						fmt.Printf(
-							"[VPN][worker-%d] FOUND server: host=%q ip=%s port=%d\n",
-							workerID,
-							server.Host,
-							server.IP,
-							server.Port,
-						)
 
 						select {
 						case results <- server:
@@ -250,11 +184,6 @@ func (d *Discoverer) Discover(
 		return result[i].Port < result[j].Port
 	})
 
-	fmt.Printf(
-		"[VPN] discovery finished: found %d server(s)\n",
-		len(result),
-	)
-
 	return result, nil
 }
 
@@ -269,22 +198,12 @@ func query(
 		Port: port,
 	}
 
-	fmt.Printf(
-		"[VPN] connecting to %s\n",
-		addr.String(),
-	)
-
 	conn, err := net.DialUDP(
 		"udp4",
 		nil,
 		addr,
 	)
 	if err != nil {
-		fmt.Printf(
-			"[VPN] dial %s failed: %v\n",
-			addr.String(),
-			err,
-		)
 		return discovery.Server{}, false
 	}
 
@@ -292,86 +211,32 @@ func query(
 
 	if deadline, ok := ctx.Deadline(); ok {
 		if err := conn.SetDeadline(deadline); err != nil {
-			fmt.Printf(
-				"[VPN] set deadline %s failed: %v\n",
-				addr.String(),
-				err,
-			)
 			return discovery.Server{}, false
 		}
 	} else {
 		if err := conn.SetDeadline(
 			time.Now().Add(500 * time.Millisecond),
 		); err != nil {
-			fmt.Printf(
-				"[VPN] set deadline %s failed: %v\n",
-				addr.String(),
-				err,
-			)
 			return discovery.Server{}, false
 		}
 	}
 
-	fmt.Printf(
-		"[VPN] sending request to %s\n",
-		addr.String(),
-	)
-
-	n, err := conn.Write(request)
+	_, err = conn.Write(request)
 	if err != nil {
-		fmt.Printf(
-			"[VPN] write %s failed: %v\n",
-			addr.String(),
-			err,
-		)
 		return discovery.Server{}, false
 	}
-
-	fmt.Printf(
-		"[VPN] request sent to %s (%d bytes)\n",
-		addr.String(),
-		n,
-	)
 
 	buffer := make([]byte, 4096)
 
-	n, remoteAddr, err := conn.ReadFromUDP(buffer)
+	n, _, err := conn.ReadFromUDP(buffer)
 	if err != nil {
-		fmt.Printf(
-			"[VPN] read response from %s failed: %v\n",
-			addr.String(),
-			err,
-		)
 		return discovery.Server{}, false
 	}
-
-	fmt.Printf(
-		"[VPN] received %d bytes from %s\n",
-		n,
-		remoteAddr.String(),
-	)
-
-	fmt.Printf(
-		"[VPN] response: %s\n",
-		string(buffer[:n]),
-	)
 
 	response, err := decodeResponse(buffer[:n])
 	if err != nil {
-		fmt.Printf(
-			"[VPN] decode response from %s failed: %v\n",
-			addr.String(),
-			err,
-		)
 		return discovery.Server{}, false
 	}
-
-	fmt.Printf(
-		"[VPN] valid response from %s: hostname=%q port=%d\n",
-		addr.String(),
-		response.Hostname,
-		response.Port,
-	)
 
 	return discovery.Server{
 		Name:   response.Hostname,
@@ -394,19 +259,9 @@ func ipv4Subnets(
 		)
 	}
 
-	fmt.Printf(
-		"[VPN] interface %s addresses:\n",
-		iface.Name,
-	)
-
 	var result []*net.IPNet
 
 	for _, addr := range addrs {
-		fmt.Printf(
-			"[VPN] address: %s\n",
-			addr.String(),
-		)
-
 		ipnet, ok := addr.(*net.IPNet)
 		if !ok {
 			continue

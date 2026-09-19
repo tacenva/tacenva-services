@@ -18,9 +18,13 @@ func NewService(discoverers ...discovery.Discoverer) *Service {
 	}
 }
 
-func (s *Service) Discover(timeout time.Duration) ([]discovery.Server, error) {
+func (s *Service) Discover(
+	timeout time.Duration,
+) ([]discovery.Server, error) {
 	if len(s.discoverers) == 0 {
-		return nil, fmt.Errorf("no server discovery providers configured")
+		return nil, fmt.Errorf(
+			"no server discovery providers configured",
+		)
 	}
 
 	type result struct {
@@ -32,26 +36,7 @@ func (s *Service) Discover(timeout time.Duration) ([]discovery.Server, error) {
 
 	for _, discoverer := range s.discoverers {
 		go func(d discovery.Discoverer) {
-			fmt.Printf(
-				"starting discovery provider: %T\n",
-				d,
-			)
-
 			servers, err := d.Discover(timeout)
-
-			if err != nil {
-				fmt.Printf(
-					"discovery provider %T error: %v\n",
-					d,
-					err,
-				)
-			} else {
-				fmt.Printf(
-					"discovery provider %T found %d server(s)\n",
-					d,
-					len(servers),
-				)
-			}
 
 			results <- result{
 				servers: servers,
@@ -91,12 +76,18 @@ func (s *Service) Discover(timeout time.Duration) ([]discovery.Server, error) {
 	return all, nil
 }
 
-func deduplicate(servers []discovery.Server) []discovery.Server {
+func deduplicate(
+	servers []discovery.Server,
+) []discovery.Server {
 	seen := make(map[string]struct{})
 	result := make([]discovery.Server, 0, len(servers))
 
 	for _, server := range servers {
-		key := fmt.Sprintf("%s:%d", server.Host, server.Port)
+		key := fmt.Sprintf(
+			"%s:%d",
+			server.Host,
+			server.Port,
+		)
 
 		if _, exists := seen[key]; exists {
 			continue

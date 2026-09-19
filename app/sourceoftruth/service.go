@@ -173,8 +173,8 @@ func (s *Service) ChangePassword(
 func normalizeAddress(address string) string {
 	address = strings.TrimSpace(address)
 
-	if address == "" {
-		return ""
+	if address == "" || address == "localhost" {
+		return address
 	}
 
 	if !strings.HasPrefix(address, "https://") &&
