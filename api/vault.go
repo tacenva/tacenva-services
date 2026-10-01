@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 )
 
@@ -19,70 +21,51 @@ func (c *Client) ListVault(
 	)
 }
 
-func (c *Client) CreateVault(
+func (c *Client) GetVaultChanges(
 	address string,
-	body any,
+	startChangeID string,
+	limit int,
 	result any,
 ) error {
-	return c.Post(
-		address,
-		"/vault",
-		body,
-		result,
-	)
-}
-
-func (c *Client) UpdateVault(
-	address string,
-	vaultID string,
-	body any,
-	result any,
-) error {
-	path := fmt.Sprintf(
-		"/vault/%s",
-		vaultID,
-	)
-
-	return c.Put(
-		address,
-		path,
-		body,
-		result,
-	)
-}
-
-func (c *Client) DeleteVault(
-	address string,
-	vaultID string,
-) error {
-	path := fmt.Sprintf(
-		"/vault/%s",
-		vaultID,
-	)
-
-	return c.Delete(
-		address,
-		path,
-		nil,
-	)
-}
-
-func (c *Client) GetRecord(
-	address string,
-	vaultID string,
-	recordID string,
-	result any,
-) error {
-	path := fmt.Sprintf(
-		"/vault/%s/record/%s",
-		vaultID,
-		recordID,
+	path := withSyncQuery(
+		"/vault/changes",
+		startChangeID,
+		limit,
 	)
 
 	return c.Get(
 		address,
 		path,
 		result,
+	)
+}
+
+func (c *Client) GetVaultChangesCount(
+	address string,
+	startChangeID string,
+	result any,
+) error {
+	path := withStartChangeID(
+		"/vault/changes/count",
+		startChangeID,
+	)
+
+	return c.Get(
+		address,
+		path,
+		result,
+	)
+}
+
+func (c *Client) SyncVault(
+	address string,
+	changes any,
+) error {
+	return c.Post(
+		address,
+		"/vault/sync",
+		changes,
+		nil,
 	)
 }
 
@@ -103,115 +86,22 @@ func (c *Client) RecordBlob(
 	)
 }
 
-func (c *Client) CreateRecordRaw(
-	address string,
-	vaultID string,
-	data []byte,
-) (string, error) {
-	path := fmt.Sprintf(
-		"/vault/%s/record",
-		vaultID,
-	)
-
-	body, err := c.doRaw(
-		http.MethodPost,
-		address,
-		path,
-		data,
-	)
-	if err != nil {
-		return "", err
-	}
-
-	return strings.TrimSpace(string(body)), nil
-}
-
-func (c *Client) UpdateRecordRaw(
-	address string,
-	vaultID string,
-	recordID string,
-	data []byte,
-) error {
-	path := fmt.Sprintf(
-		"/vault/%s/record/%s",
-		vaultID,
-		recordID,
-	)
-
-	_, err := c.doRaw(
-		http.MethodPut,
-		address,
-		path,
-		data,
-	)
-
-	return err
-}
-
-func (c *Client) DeleteRecord(
-	address string,
-	vaultID string,
-	recordID string,
-) error {
-	path := fmt.Sprintf(
-		"/vault/%s/record/%s",
-		vaultID,
-		recordID,
-	)
-
-	return c.Delete(
-		address,
-		path,
-		nil,
-	)
-}
-
-func (c *Client) GetVaultChanges(
-	address string,
-	result any,
-) error {
-	return c.Get(
-		address,
-		"/vault/changes",
-		result,
-	)
-}
-
-func (c *Client) GetVaultChangesCount(
-	address string,
-	result any,
-) error {
-	return c.Get(
-		address,
-		"/vault/changes/count",
-		result,
-	)
-}
-
-func (c *Client) MarkVaultChangesSynced(
-	address string,
-	changeIDs []string,
-) error {
-	return c.Post(
-		address,
-		"/vault/changes/synced",
-		struct {
-			ChangeIDs []string `json:"change_ids"`
-		}{
-			ChangeIDs: changeIDs,
-		},
-		nil,
-	)
-}
-
 func (c *Client) GetRecordChanges(
 	address string,
 	vaultID string,
+	startChangeID string,
+	limit int,
 	result any,
 ) error {
 	path := fmt.Sprintf(
 		"/vault/%s/record/changes",
 		vaultID,
+	)
+
+	path = withSyncQuery(
+		path,
+		startChangeID,
+		limit,
 	)
 
 	return c.Get(
@@ -224,11 +114,17 @@ func (c *Client) GetRecordChanges(
 func (c *Client) GetRecordChangesCount(
 	address string,
 	vaultID string,
+	startChangeID string,
 	result any,
 ) error {
 	path := fmt.Sprintf(
 		"/vault/%s/record/changes/count",
 		vaultID,
+	)
+
+	path = withStartChangeID(
+		path,
+		startChangeID,
 	)
 
 	return c.Get(
@@ -238,26 +134,70 @@ func (c *Client) GetRecordChangesCount(
 	)
 }
 
-func (c *Client) MarkRecordChangesSynced(
+func (c *Client) SyncRecords(
 	address string,
 	vaultID string,
-	changeIDs []string,
+	changes any,
 ) error {
 	path := fmt.Sprintf(
-		"/vault/%s/record/changes/synced",
+		"/vault/%s/record/sync",
 		vaultID,
 	)
 
 	return c.Post(
 		address,
 		path,
-		struct {
-			ChangeIDs []string `json:"change_ids"`
-		}{
-			ChangeIDs: changeIDs,
-		},
+		changes,
 		nil,
 	)
+}
+
+func withStartChangeID(
+	path string,
+	startChangeID string,
+) string {
+	return withStartQuery(
+		path,
+		"start_change_id",
+		startChangeID,
+	)
+}
+
+func withStartQuery(
+	path string,
+	key string,
+	value string,
+) string {
+	query := url.Values{}
+
+	query.Set(
+		key,
+		value,
+	)
+
+	return path + "?" + query.Encode()
+}
+
+func withSyncQuery(
+	path string,
+	startChangeID string,
+	limit int,
+) string {
+	query := url.Values{}
+
+	query.Set(
+		"start_change_id",
+		startChangeID,
+	)
+
+	if limit > 0 {
+		query.Set(
+			"limit",
+			strconv.Itoa(limit),
+		)
+	}
+
+	return path + "?" + query.Encode()
 }
 
 func (c *Client) doRaw(

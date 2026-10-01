@@ -49,6 +49,7 @@ func (s *remoteService) Get(
 func (s *remoteService) Create(
 	name string,
 	privilege entity.Privilege,
+	group string,
 ) ([]entity.VaultAccess, *entity.Permission, *keyring.KeyPair, error) {
 	if s.context.SelectedSoT == nil {
 		return nil, nil, nil, fmt.Errorf(
@@ -60,6 +61,7 @@ func (s *remoteService) Create(
 		s.context.SelectedSoT.Address,
 		name,
 		privilege,
+		group,
 	)
 	if err != nil {
 		return nil, nil, nil, err
@@ -80,6 +82,21 @@ func (s *remoteService) ChangeName(
 		s.context.SelectedSoT.Address,
 		id,
 		name,
+	)
+}
+
+func (s *remoteService) ChangeGroup(
+	id string,
+	group string,
+) error {
+	if s.context.SelectedSoT == nil {
+		return fmt.Errorf("selected source of truth is nil")
+	}
+
+	return s.appDeps.Client.ChangeAccessControlGroup(
+		s.context.SelectedSoT.Address,
+		id,
+		group,
 	)
 }
 

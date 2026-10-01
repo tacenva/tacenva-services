@@ -58,11 +58,12 @@ func (s *Service) Get(
 func (s *Service) Create(
 	name string,
 	privilege entity.Privilege,
+	group string,
 ) ([]entity.VaultAccess, *entity.Permission, *keyring.KeyPair, error) {
 	if s.context.IsRemote {
-		return s.remoteService.Create(name, privilege)
+		return s.remoteService.Create(name, privilege, group)
 	}
-	return s.localService.Create(name, privilege)
+	return s.localService.Create(name, privilege, group)
 }
 
 func (s *Service) ChangeName(
@@ -73,6 +74,16 @@ func (s *Service) ChangeName(
 		return s.remoteService.ChangeName(id, name)
 	}
 	return s.localService.ChangeName(id, name)
+}
+
+func (s *Service) ChangeGroup(
+	id string,
+	group string,
+) error {
+	if s.context.IsRemote {
+		return s.remoteService.ChangeGroup(id, group)
+	}
+	return s.localService.ChangeGroup(id, group)
 }
 
 func (s *Service) ChangePrivilege(
@@ -128,45 +139,4 @@ func (s *Service) DeleteAccessControl(
 		return s.remoteService.DeleteAccessControl(id)
 	}
 	return s.localService.DeleteAccessControl(id)
-}
-
-func (s *Service) GrantPrivilege(
-	id string,
-	myVaultAccessList []entity.VaultAccess,
-	keyPair *keyring.KeyPair,
-) error {
-	newVaultAccessList := make([]entity.VaultAccess, 0, len(myVaultAccessList))
-
-	for _, vaultAccess := range myVaultAccessList {
-		vaultKey, err := s.context.SelectedSoT.KeyPair.Open(
-			vaultAccess.VaultKey,
-		)
-		if err != nil {
-			return err
-		}
-
-		encryptedVaultKey, err := keyPair.Seal(vaultKey)
-		if err != nil {
-			return err
-		}
-
-		newVaultAccessList = append(
-			newVaultAccessList,
-			entity.VaultAccess{
-				VaultID:      vaultAccess.VaultID,
-				PermissionID: id,
-				VaultKey:     encryptedVaultKey,
-			},
-		)
-	}
-
-	if s.context.IsRemote {
-		return s.remoteService.GrantPrivilege(
-			newVaultAccessList,
-		)
-	}
-
-	return s.localService.GrantPrivilege(
-		newVaultAccessList,
-	)
 }

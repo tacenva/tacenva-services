@@ -66,6 +66,7 @@ func (c *Client) CreateAccessControl(
 	address string,
 	name string,
 	privilege entity.Privilege,
+	group string,
 ) (*AccessControlCreateResponse, error) {
 	name = strings.TrimSpace(name)
 
@@ -78,9 +79,11 @@ func (c *Client) CreateAccessControl(
 	request := struct {
 		Name      string           `json:"name"`
 		Privilege entity.Privilege `json:"privilege"`
+		Group     string           `json:"group"`
 	}{
 		Name:      name,
 		Privilege: privilege,
+		Group:     group,
 	}
 
 	var response AccessControlCreateResponse
@@ -129,6 +132,40 @@ func (c *Client) ChangeAccessControlName(
 		nil,
 	); err != nil {
 		return fmt.Errorf("change access control name: %w", err)
+	}
+
+	return nil
+}
+
+func (c *Client) ChangeAccessControlGroup(
+	address string,
+	id string,
+	group string,
+) error {
+	id = strings.TrimSpace(id)
+	group = strings.TrimSpace(group)
+
+	if id == "" {
+		return fmt.Errorf("access control id is required")
+	}
+
+	if group == "" {
+		return fmt.Errorf("access control group is required")
+	}
+
+	request := struct {
+		Group string `json:"group"`
+	}{
+		Group: group,
+	}
+
+	if err := c.Patch(
+		address,
+		"/access-control/"+url.PathEscape(id)+"/group",
+		request,
+		nil,
+	); err != nil {
+		return fmt.Errorf("change access control group: %w", err)
 	}
 
 	return nil

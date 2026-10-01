@@ -68,6 +68,7 @@ func (s *localService) Get(
 func (s *localService) Create(
 	name string,
 	privilege entity.Privilege,
+	group string,
 ) ([]entity.VaultAccess, *entity.Permission, *keyring.KeyPair, error) {
 	authUser, err := s.authUser()
 	if err != nil {
@@ -78,6 +79,7 @@ func (s *localService) Create(
 		authUser,
 		name,
 		privilege,
+		group,
 	)
 }
 
@@ -94,6 +96,22 @@ func (s *localService) ChangeName(
 		authUser,
 		id,
 		name,
+	)
+}
+
+func (s *localService) ChangeGroup(
+	id string,
+	group string,
+) error {
+	authUser, err := s.authUser()
+	if err != nil {
+		return err
+	}
+
+	return s.coreACService.ChangeGroup(
+		authUser,
+		id,
+		group,
 	)
 }
 
@@ -180,19 +198,5 @@ func (s *localService) DeleteAccessControl(
 	return s.coreACService.DeletePermission(
 		authUser,
 		id,
-	)
-}
-
-func (s *localService) GrantPrivilege(
-	vaultAccessList []entity.VaultAccess,
-) error {
-	authUser, err := s.authUser()
-	if err != nil {
-		return err
-	}
-
-	return s.coreACService.GrantPrivilege(
-		authUser,
-		vaultAccessList,
 	)
 }
