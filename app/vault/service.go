@@ -11,7 +11,6 @@ import (
 	"github.com/tacenva/tacpass-core/auth"
 	"github.com/tacenva/tacpass-core/contract"
 	coreEntity "github.com/tacenva/tacpass-core/entity"
-	"github.com/tacenva/tacpass-core/util/credential"
 	"github.com/tacenva/tacpass-core/util/keyring"
 	vaultCore "github.com/tacenva/tacpass-core/vault"
 	vaultrecordCore "github.com/tacenva/tacpass-core/vaultrecord"
@@ -51,12 +50,10 @@ func NewService(
 }
 
 func (s *Service) getLocalVaultChanges(
-	authUser *coreEntity.User,
 	lastChangeID string,
 	vaultFile *database.DatabaseFile,
 ) ([]contract.PendingVaultChange, error) {
 	changeCount, err := s.vaultService.GetChangeCount(
-		authUser,
 		s.context.SelectedSoT.ID,
 		lastChangeID,
 	)
@@ -69,7 +66,6 @@ func (s *Service) getLocalVaultChanges(
 	}
 
 	return s.vaultService.GetChangesAfterOnReplica(
-		authUser,
 		s.context.SelectedSoT.ID,
 		lastChangeID,
 		int(changeCount),
@@ -155,13 +151,6 @@ func (s *Service) SyncVault() error {
 		return nil
 	}
 
-	authUser, err := s.authUser()
-	if err != nil {
-		return err
-	}
-
-	vaultDir := s.vaultDir()
-
 	lastChangeID, err := s.vaultService.GetSyncLatestChangeId(
 		s.context.SelectedSoT.ID,
 	)
@@ -175,7 +164,6 @@ func (s *Service) SyncVault() error {
 	}
 
 	localChanges, err := s.getLocalVaultChanges(
-		authUser,
 		lastChangeID,
 		vaultFile,
 	)
@@ -196,8 +184,6 @@ func (s *Service) SyncVault() error {
 	)
 
 	if err := s.vaultService.SyncOnReplica(
-		authUser,
-		vaultDir,
 		s.context.SelectedSoT.ID,
 		localChangesToSync,
 		vaultFile,
@@ -210,13 +196,18 @@ func (s *Service) SyncVault() error {
 		clientChanges,
 	)
 
+	var permissionList []coreEntity.Permission
+
+	err = s.appDeps.Client.GetConnectedPermission(
+		s.context.SelectedSoT.Address,
+		&permissionList,
+	)
+	if err != nil {
+		return err
+	}
+
 	for _, change := range clientChangesToSync {
 		if change.SyncChange.Operation == "create" {
-			permissionList, err := s.vaultService.GetConnectedPermission(authUser)
-			if err != nil {
-				break
-			}
-
 			keyPair := keyring.FromKeys(s.context.SelectedSoT.KeyPair.PublicKey, s.context.SelectedSoT.KeyPair.PrivateKey)
 			vaultKey, err := keyPair.Open(change.VaultAccessList[0].VaultKey)
 			if err != nil {
@@ -261,57 +252,25 @@ func (s *Service) CreateVault(
 		)
 	}
 
-	authUser, err := s.authUser()
-	if err != nil {
-		return nil, err
-	}
-
 	var (
 		syncChangeID string
 		vaData       *coreEntity.VaultAccess
 	)
 
 	if !s.context.IsRemote {
-		newVault, err := s.vaultService.CreateOnSoT(
+		authUser, err := s.authUser()
+		if err != nil {
+			return nil, err
+		}
+
+		vaData, err := s.vaultService.CreateOnSoT(
 			authUser,
 			vaultName,
 			s.context.SelectedSoT.ID,
 			&syncChangeID,
 		)
-
-		connectedPermission, err := s.vaultService.GetConnectedPermission(authUser)
 		if err != nil {
 			return nil, err
-		}
-
-		vaultKey, err := credential.Generate(32)
-		if err != nil {
-			return nil, err
-		}
-
-		vaList := make(
-			[]coreEntity.VaultAccess,
-			0,
-			len(connectedPermission),
-		)
-
-		for _, permissionData := range connectedPermission {
-			keyPair := keyring.FromPublicKey(permissionData.PublicKey)
-			wrappedVaultKey, err := keyPair.Seal([]byte(vaultKey))
-			if err != nil {
-				break
-			}
-
-			vaList = append(vaList, coreEntity.VaultAccess{
-				VaultID:      newVault.ID,
-				PermissionID: permissionData.ID,
-				VaultKey:     wrappedVaultKey,
-			})
-
-			if permissionData.ID == authUser.PermissionID {
-				vaData = &vaList[len(vaList)-1]
-				vaData.Vault = *newVault
-			}
 		}
 
 		return vaData, err
@@ -323,7 +282,6 @@ func (s *Service) CreateVault(
 	}
 
 	_, err = s.vaultService.CreateOnReplica(
-		authUser,
 		vaultName,
 		s.context.SelectedSoT.ID,
 		&syncChangeID,
@@ -389,7 +347,6 @@ func (s *Service) UpdateVault(
 	}
 
 	_, err = s.vaultService.UpdateOnReplica(
-		authUser,
 		vault.ID,
 		vault.Name,
 		s.context.SelectedSoT.ID,
@@ -457,7 +414,6 @@ func (s *Service) DeleteVault(
 	}
 
 	err = s.vaultService.DeleteOnReplica(
-		authUser,
 		vaultDir,
 		vault.ID,
 		s.context.SelectedSoT.ID,

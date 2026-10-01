@@ -10,6 +10,17 @@ import (
 	"strings"
 )
 
+func (c *Client) GetConnectedPermission(
+	address string,
+	result any,
+) error {
+	return c.Get(
+		address,
+		"/vault/connected-permission",
+		result,
+	)
+}
+
 func (c *Client) ListVault(
 	address string,
 	result any,
