@@ -44,6 +44,7 @@ func NewService(
 		context:   context,
 		masterKey: masterKey,
 
+		authService:        authService,
 		vaultService:       vaultService,
 		vaultrecordService: vaultrecordService,
 	}
@@ -107,18 +108,25 @@ func (s *Service) getClientVaultChanges(
 }
 
 func (s *Service) List() ([]coreEntity.VaultAccess, bool, error) {
-	authUser, err := s.authUser()
-	if err != nil {
-		return nil, false, err
-	}
-	vaList, err := s.vaultService.VaultAccessList(authUser)
-	if err != nil {
-		return nil, false, err
-	}
+	var (
+		vaList []coreEntity.VaultAccess
+		err    error
+	)
 
 	if !s.context.IsRemote {
+		authUser, err := s.authUser()
+		if err != nil {
+			return nil, false, err
+		}
+		vaList, err = s.vaultService.VaultAccessList(authUser)
+		if err != nil {
+			return nil, false, err
+		}
 		return vaList, false, err
 	}
+
+	dbFile, err := s.openVaultFile()
+	err = dbFile.FindAll(&vaList)
 
 	switch s.context.SelectedSoT.SyncMode {
 	case operationsEntity.SyncModeAuto:
@@ -265,6 +273,7 @@ func (s *Service) CreateVault(
 
 		vaData, err := s.vaultService.CreateOnSoT(
 			authUser,
+			s.vaultDir(),
 			vaultName,
 			s.context.SelectedSoT.ID,
 			&syncChangeID,
