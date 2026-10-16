@@ -77,18 +77,19 @@ func (s *Service) getLocalVaultChanges(
 func (s *Service) getClientVaultChanges(
 	lastChangeID string,
 ) ([]contract.PendingVaultChange, error) {
-	var changeCount int64
-
+	var result struct {
+		Count int64 `json:"count"`
+	}
 	err := s.appDeps.Client.GetVaultChangesCount(
 		s.context.SelectedSoT.Address,
 		lastChangeID,
-		&changeCount,
+		&result,
 	)
 	if err != nil {
 		return nil, err
 	}
 
-	if changeCount == 0 {
+	if result.Count == 0 {
 		return nil, nil
 	}
 
@@ -97,7 +98,7 @@ func (s *Service) getClientVaultChanges(
 	err = s.appDeps.Client.GetVaultChanges(
 		s.context.SelectedSoT.Address,
 		lastChangeID,
-		int(changeCount),
+		int(result.Count),
 		&changes,
 	)
 	if err != nil {
@@ -138,18 +139,19 @@ func (s *Service) List() ([]coreEntity.VaultAccess, bool, error) {
 			return vaList, false, err
 		}
 
-		var changeCount int64
-
+		var result struct {
+			Count int64 `json:"count"`
+		}
 		err = s.appDeps.Client.GetVaultChangesCount(
 			s.context.SelectedSoT.Address,
 			lastChangeID,
-			&changeCount,
+			&result,
 		)
 		if err != nil {
 			return vaList, false, err
 		}
 
-		return vaList, changeCount > 0, nil
+		return vaList, result.Count > 0, nil
 	}
 	return nil, false, nil
 }
@@ -291,6 +293,7 @@ func (s *Service) CreateVault(
 	}
 
 	_, err = s.vaultService.CreateOnReplica(
+		s.vaultDir(),
 		vaultName,
 		s.context.SelectedSoT.ID,
 		&syncChangeID,
@@ -363,6 +366,7 @@ func (s *Service) UpdateVault(
 		dbFile,
 	)
 
+	// fmt.Printf("Name %s", vault.Name)
 	if s.context.SelectedSoT.SyncMode == operationsEntity.SyncModeAuto {
 		err = s.SyncVault()
 		if err != nil {
