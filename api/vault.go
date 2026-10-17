@@ -16,7 +16,7 @@ func (c *Client) GetConnectedPermission(
 ) error {
 	return c.Get(
 		address,
-		"/vault/connected-permission",
+		"/vault/permission",
 		result,
 	)
 }
