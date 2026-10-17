@@ -298,6 +298,7 @@ func (s *Service) CreateVault(
 		s.context.SelectedSoT.ID,
 		&syncChangeID,
 		dbFile,
+		&s.context.SelectedSoT.KeyPair,
 	)
 
 	if s.context.SelectedSoT.SyncMode == operationsEntity.SyncModeAuto {
@@ -880,21 +881,13 @@ func (s *Service) ListRecord(
 		)
 	}
 
-	authUser, err := s.authUser()
-	if err != nil {
-		return nil, false, err
-	}
-
 	vaultDir := s.vaultDir()
-	vaultKey, err := s.context.SelectedSoT.KeyPair.Open(
-		vaultAccess.VaultKey,
-	)
+	vaultKey, err := s.context.SelectedSoT.KeyPair.Open(vaultAccess.VaultKey)
 	if err != nil {
 		return nil, false, err
 	}
 
 	records, err := s.vaultrecordService.List(
-		authUser,
 		vaultDir,
 		vaultAccess.VaultID,
 		string(vaultKey),
@@ -914,7 +907,6 @@ func (s *Service) ListRecord(
 		}
 
 		records, err = s.vaultrecordService.List(
-			authUser,
 			vaultDir,
 			vaultAccess.VaultID,
 			string(vaultKey),
@@ -934,19 +926,20 @@ func (s *Service) ListRecord(
 			return records, false, err
 		}
 
-		var changeCount int64
-
+		var result struct {
+			Count int64 `json:"count"`
+		}
 		err = s.appDeps.Client.GetRecordChangesCount(
 			s.context.SelectedSoT.Address,
 			vaultAccess.VaultID,
 			lastChangeID,
-			&changeCount,
+			&result,
 		)
 		if err != nil {
 			return records, false, err
 		}
 
-		return records, changeCount > 0, nil
+		return records, result.Count > 0, nil
 	}
 
 	return records, false, nil
