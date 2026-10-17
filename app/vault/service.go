@@ -2,6 +2,7 @@ package vault
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/tacenva/database"
 	"github.com/tacenva/tacenva-services/app"
@@ -171,53 +172,62 @@ func (s *Service) SyncVault() error {
 		return err
 	}
 
+	// // DEBUG: parameter awal
+	// fmt.Printf("\n========== DEBUG SYNC CHANGES ==========\n")
+	// fmt.Printf("lastChangeID: %q\n", lastChangeID)
+
+	// Ambil local changes
 	localChanges, err := s.getLocalVaultChanges(lastChangeID, vaultFile)
 	if err != nil {
+		fmt.Printf("[DEBUG] getLocalVaultChanges ERROR: %v\n", err)
 		return err
 	}
 
-	clientChanges, err := s.getClientVaultChanges(lastChangeID)
-	if err != nil {
-		return err
-	}
-
-	localChangesToSync := s.vaultService.DiffVaultChanges(localChanges, clientChanges)
-
-	// // DEBUG: localChangesToSync
-	// debugLocal, err := json.MarshalIndent(localChangesToSync, "", "  ")
+	// // DEBUG: hasil local changes
+	// localDebug, err := json.MarshalIndent(localChanges, "", "  ")
 	// if err != nil {
-	// 	fmt.Printf("[DEBUG] Gagal marshal localChangesToSync: %v\n", err)
+	// 	fmt.Printf("[DEBUG] Gagal marshal localChanges: %v\n", err)
 	// } else {
 	// 	fmt.Printf(
-	// 		"\n========== localChangesToSync (%d) ==========\n%s\n",
-	// 		len(localChangesToSync),
-	// 		string(debugLocal),
+	// 		"\n[DEBUG] localChanges (count=%d):\n%s\n",
+	// 		len(localChanges),
+	// 		string(localDebug),
 	// 	)
 	// }
 
+	// Ambil client changes
+	clientChanges, err := s.getClientVaultChanges(lastChangeID)
+	if err != nil {
+		fmt.Printf("[DEBUG] getClientVaultChanges ERROR: %v\n", err)
+		return err
+	}
+
+	// // DEBUG: hasil client changes
+	// clientDebug, err := json.MarshalIndent(clientChanges, "", "  ")
+	// if err != nil {
+	// 	fmt.Printf("[DEBUG] Gagal marshal clientChanges: %v\n", err)
+	// } else {
+	// 	fmt.Printf(
+	// 		"\n[DEBUG] clientChanges (count=%d):\n%s\n",
+	// 		len(clientChanges),
+	// 		string(clientDebug),
+	// 	)
+	// }
+
+	// fmt.Printf("\n========== END DEBUG SYNC CHANGES ==========\n")
+
+	// localChangesToSync := s.vaultService.DiffVaultChanges(localChanges, clientChanges)
+
 	if err := s.vaultService.SyncOnReplica(
-		// s.vaultDir(),
 		s.context.SelectedSoT.ID,
-		localChangesToSync,
+		// localChangesToSync,
+		clientChanges,
 		vaultFile,
-		// &s.context.SelectedSoT.KeyPair,
 	); err != nil {
 		return err
 	}
 
-	clientChangesToSync := s.vaultService.DiffVaultChanges(clientChanges, localChanges)
-
-	// // DEBUG: clientChangesToSync
-	// debugClient, err := json.MarshalIndent(clientChangesToSync, "", "  ")
-	// if err != nil {
-	// 	fmt.Printf("[DEBUG] Gagal marshal clientChangesToSync: %v\n", err)
-	// } else {
-	// 	fmt.Printf(
-	// 		"\n========== clientChangesToSync (%d) ==========\n%s\n",
-	// 		len(clientChangesToSync),
-	// 		string(debugClient),
-	// 	)
-	// }
+	// clientChangesToSync := s.vaultService.DiffVaultChanges(clientChanges, localChanges)
 
 	var permissionList []coreEntity.Permission
 
@@ -229,8 +239,12 @@ func (s *Service) SyncVault() error {
 		return err
 	}
 
-	for _, change := range clientChangesToSync {
+	// for _, change := range clientChangesToSync {
+	for _, change := range localChanges {
 		if change.SyncChange.Operation == "create" {
+			if len(change.VaultAccessList) == 0 {
+				continue
+			}
 			keyPair := keyring.FromKeys(s.context.SelectedSoT.KeyPair.PublicKey, s.context.SelectedSoT.KeyPair.PrivateKey)
 			vaultKey, err := keyPair.Open(change.VaultAccessList[0].VaultKey)
 			if err != nil {
@@ -258,7 +272,8 @@ func (s *Service) SyncVault() error {
 
 	return s.appDeps.Client.SyncVault(
 		s.context.SelectedSoT.Address,
-		clientChangesToSync,
+		// clientChangesToSync,
+		localChanges,
 	)
 }
 
@@ -723,30 +738,32 @@ func (s *Service) SyncRecord(
 		return err
 	}
 
-	localChangesToSync := s.vaultrecordService.DiffRecordChanges(
-		localChanges,
-		clientChanges,
-	)
+	// localChangesToSync := s.vaultrecordService.DiffRecordChanges(
+	// 	localChanges,
+	// 	clientChanges,
+	// )
 
 	if err := s.vaultrecordService.Sync(
 		authUser,
 		vaultDir,
 		s.context.SelectedSoT.ID,
 		vaultAccess.VaultID,
-		localChangesToSync,
+		// localChangesToSync,
+		clientChanges,
 	); err != nil {
 		return err
 	}
 
-	clientChangesToSync := s.vaultrecordService.DiffRecordChanges(
-		clientChanges,
-		localChanges,
-	)
+	// clientChangesToSync := s.vaultrecordService.DiffRecordChanges(
+	// 	clientChanges,
+	// 	localChanges,
+	// )
 
 	return s.appDeps.Client.SyncRecords(
 		s.context.SelectedSoT.Address,
 		vaultAccess.VaultID,
-		clientChangesToSync,
+		// clientChangesToSync,
+		localChanges,
 	)
 }
 
