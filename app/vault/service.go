@@ -1,10 +1,7 @@
 package vault
 
 import (
-	"encoding/json"
 	"errors"
-	"fmt"
-	"log"
 
 	"github.com/tacenva/database"
 	"github.com/tacenva/tacenva-services/app"
@@ -147,7 +144,7 @@ func (s *Service) List() ([]coreEntity.VaultAccess, bool, error) {
 			return vaList, false, err
 		}
 
-		fmt.Printf("total 1: %d\n", totalChanges)
+		// fmt.Printf("total 1: %d\n", totalChanges)
 
 		var result struct {
 			Count int64 `json:"count"`
@@ -162,7 +159,7 @@ func (s *Service) List() ([]coreEntity.VaultAccess, bool, error) {
 		}
 
 		totalChanges += result.Count
-		fmt.Printf("total 2: %d\n", totalChanges)
+		// fmt.Printf("total 2: %d\n", totalChanges)
 
 		return vaList, totalChanges > 0, nil
 	}
@@ -205,8 +202,8 @@ func (s *Service) SyncVault() error {
 
 	clientChangesToSync := s.vaultService.MergePendingVaultChange(localChanges, clientChanges)
 
-	debug, _ := json.MarshalIndent(clientChangesToSync, "", "  ")
-	log.Printf("clientChangesToSync:\n%s", debug)
+	// debug, _ := json.MarshalIndent(clientChangesToSync, "", "  ")
+	// log.Printf("clientChangesToSync:\n%s", debug)
 
 	var permissionList []coreEntity.Permission
 	if err = s.appDeps.Client.ConnectedPublicKeys(
@@ -216,13 +213,14 @@ func (s *Service) SyncVault() error {
 		return err
 	}
 
-	debug, _ = json.MarshalIndent(permissionList, "", "  ")
-	log.Printf("permissionList:\n%s", debug)
+	// debug, _ = json.MarshalIndent(permissionList, "", "  ")
+	// log.Printf("permissionList:\n%s", debug)
+	// log.Printf("jumlah changes: %d", len(clientChangesToSync))
 
 	for changeIndex := range clientChangesToSync {
 		change := &clientChangesToSync[changeIndex]
 
-		if change.SyncChange.Operation != "create" {
+		if change.SyncChange.Operation == "delete" {
 			continue
 		}
 
@@ -248,6 +246,7 @@ func (s *Service) SyncVault() error {
 				return err
 			}
 
+			// log.Printf("base: %s\ncomp: %s\n", permissionData.PublicKey, s.context.SelectedSoT.KeyPair.PublicKey)
 			if permissionData.PublicKey == s.context.SelectedSoT.KeyPair.PublicKey {
 				change.VaultAccessList[0].PermissionID = permissionData.ID
 			} else {
@@ -261,13 +260,17 @@ func (s *Service) SyncVault() error {
 		}
 	}
 
-	debug, _ = json.MarshalIndent(clientChangesToSync, "", "  ")
-	log.Printf("clientChangesToSync:\n%s", debug)
+	// debug, _ = json.MarshalIndent(clientChangesToSync, "", "  ")
+	// log.Printf("clientChangesToSync:\n%s", debug)
 
-	return s.appDeps.Client.SyncVault(
+	if err := s.appDeps.Client.SyncVault(
 		s.context.SelectedSoT.Address,
 		clientChangesToSync,
-	)
+	); err != nil {
+		return err
+	}
+
+	return s.vaultService.SetSyncStateToBeLastest(s.context.SelectedSoT.ID)
 }
 
 func (s *Service) CreateVault(
@@ -325,12 +328,15 @@ func (s *Service) CreateVault(
 		dbFile,
 		&s.context.SelectedSoT.KeyPair,
 	)
+	if err != nil {
+		return vaData, err
+	}
 
 	if s.context.SelectedSoT.SyncMode == operationsEntity.SyncModeAuto {
 		err = s.SyncVault()
 	}
 
-	return vaData, nil
+	return vaData, err
 }
 
 func (s *Service) UpdateVault(
@@ -389,9 +395,12 @@ func (s *Service) UpdateVault(
 		&syncChangeID,
 		dbFile,
 	)
+	if err != nil {
+		return err
+	}
+
 	if s.context.SelectedSoT.SyncMode == operationsEntity.SyncModeAuto {
-		err = s.SyncVault()
-		if err != nil {
+		if err = s.SyncVault(); err != nil {
 			return err
 		}
 	}
@@ -455,6 +464,9 @@ func (s *Service) DeleteVault(
 		&syncChangeID,
 		dbFile,
 	)
+	if err != nil {
+		return err
+	}
 
 	if s.context.SelectedSoT.SyncMode == operationsEntity.SyncModeAuto {
 		err = s.SyncVault()
