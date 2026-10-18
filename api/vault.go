@@ -10,13 +10,13 @@ import (
 	"strings"
 )
 
-func (c *Client) GetConnectedPermission(
+func (c *Client) ConnectedPublicKeys(
 	address string,
 	result any,
 ) error {
 	return c.Get(
 		address,
-		"/vault/permission",
+		"/vault/connected-public-keys",
 		result,
 	)
 }

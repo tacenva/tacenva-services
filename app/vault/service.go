@@ -1,8 +1,10 @@
 package vault
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 
 	"github.com/tacenva/database"
 	"github.com/tacenva/tacenva-services/app"
@@ -140,6 +142,13 @@ func (s *Service) List() ([]coreEntity.VaultAccess, bool, error) {
 			return vaList, false, err
 		}
 
+		totalChanges, err := s.vaultService.GetChangeCount(s.context.SelectedSoT.ID, lastChangeID)
+		if err != nil {
+			return vaList, false, err
+		}
+
+		fmt.Printf("total 1: %d\n", totalChanges)
+
 		var result struct {
 			Count int64 `json:"count"`
 		}
@@ -152,7 +161,10 @@ func (s *Service) List() ([]coreEntity.VaultAccess, bool, error) {
 			return vaList, false, err
 		}
 
-		return vaList, result.Count > 0, nil
+		totalChanges += result.Count
+		fmt.Printf("total 2: %d\n", totalChanges)
+
+		return vaList, totalChanges > 0, nil
 	}
 	return nil, false, nil
 }
@@ -172,108 +184,89 @@ func (s *Service) SyncVault() error {
 		return err
 	}
 
-	// // DEBUG: parameter awal
-	// fmt.Printf("\n========== DEBUG SYNC CHANGES ==========\n")
-	// fmt.Printf("lastChangeID: %q\n", lastChangeID)
-
-	// Ambil local changes
 	localChanges, err := s.getLocalVaultChanges(lastChangeID, vaultFile)
 	if err != nil {
-		fmt.Printf("[DEBUG] getLocalVaultChanges ERROR: %v\n", err)
 		return err
 	}
 
-	// // DEBUG: hasil local changes
-	// localDebug, err := json.MarshalIndent(localChanges, "", "  ")
-	// if err != nil {
-	// 	fmt.Printf("[DEBUG] Gagal marshal localChanges: %v\n", err)
-	// } else {
-	// 	fmt.Printf(
-	// 		"\n[DEBUG] localChanges (count=%d):\n%s\n",
-	// 		len(localChanges),
-	// 		string(localDebug),
-	// 	)
-	// }
-
-	// Ambil client changes
 	clientChanges, err := s.getClientVaultChanges(lastChangeID)
 	if err != nil {
-		fmt.Printf("[DEBUG] getClientVaultChanges ERROR: %v\n", err)
 		return err
 	}
-
-	// // DEBUG: hasil client changes
-	// clientDebug, err := json.MarshalIndent(clientChanges, "", "  ")
-	// if err != nil {
-	// 	fmt.Printf("[DEBUG] Gagal marshal clientChanges: %v\n", err)
-	// } else {
-	// 	fmt.Printf(
-	// 		"\n[DEBUG] clientChanges (count=%d):\n%s\n",
-	// 		len(clientChanges),
-	// 		string(clientDebug),
-	// 	)
-	// }
-
-	// fmt.Printf("\n========== END DEBUG SYNC CHANGES ==========\n")
-
-	// localChangesToSync := s.vaultService.DiffVaultChanges(localChanges, clientChanges)
 
 	if err := s.vaultService.SyncOnReplica(
 		s.context.SelectedSoT.ID,
-		// localChangesToSync,
+		localChanges,
 		clientChanges,
 		vaultFile,
 	); err != nil {
 		return err
 	}
 
-	// clientChangesToSync := s.vaultService.DiffVaultChanges(clientChanges, localChanges)
+	clientChangesToSync := s.vaultService.MergePendingVaultChange(localChanges, clientChanges)
+
+	debug, _ := json.MarshalIndent(clientChangesToSync, "", "  ")
+	log.Printf("clientChangesToSync:\n%s", debug)
 
 	var permissionList []coreEntity.Permission
-
-	err = s.appDeps.Client.GetConnectedPermission(
+	if err = s.appDeps.Client.ConnectedPublicKeys(
 		s.context.SelectedSoT.Address,
 		&permissionList,
-	)
-	if err != nil {
+	); err != nil {
 		return err
 	}
 
-	// for _, change := range clientChangesToSync {
-	for _, change := range localChanges {
-		if change.SyncChange.Operation == "create" {
-			if len(change.VaultAccessList) == 0 {
-				continue
-			}
-			keyPair := keyring.FromKeys(s.context.SelectedSoT.KeyPair.PublicKey, s.context.SelectedSoT.KeyPair.PrivateKey)
-			vaultKey, err := keyPair.Open(change.VaultAccessList[0].VaultKey)
+	debug, _ = json.MarshalIndent(permissionList, "", "  ")
+	log.Printf("permissionList:\n%s", debug)
+
+	for changeIndex := range clientChangesToSync {
+		change := &clientChangesToSync[changeIndex]
+
+		if change.SyncChange.Operation != "create" {
+			continue
+		}
+
+		if len(change.VaultAccessList) == 0 {
+			continue
+		}
+
+		keyPair := keyring.FromKeys(
+			s.context.SelectedSoT.KeyPair.PublicKey,
+			s.context.SelectedSoT.KeyPair.PrivateKey,
+		)
+
+		vaultKey, err := keyPair.Open(change.VaultAccessList[0].VaultKey)
+		if err != nil {
+			return err
+		}
+
+		for _, permissionData := range permissionList {
+			keyPair := keyring.FromPublicKey(permissionData.PublicKey)
+
+			wrappedVaultKey, err := keyPair.Seal([]byte(vaultKey))
 			if err != nil {
-				break
+				return err
 			}
 
-			for _, permissionData := range permissionList {
-				keyPair := keyring.FromPublicKey(permissionData.PublicKey)
-				wrappedVaultKey, err := keyPair.Seal([]byte(vaultKey))
-				if err != nil {
-					break
-				}
-
-				vaData := coreEntity.VaultAccess{
+			if permissionData.PublicKey == s.context.SelectedSoT.KeyPair.PublicKey {
+				change.VaultAccessList[0].PermissionID = permissionData.ID
+			} else {
+				access := coreEntity.VaultAccess{
 					VaultID:      change.Vault.ID,
 					PermissionID: permissionData.ID,
 					VaultKey:     wrappedVaultKey,
 				}
-				if change.VaultAccessList[0].PermissionID != permissionData.ID {
-					change.VaultAccessList = append(change.VaultAccessList, vaData)
-				}
+				change.VaultAccessList = append(change.VaultAccessList, access)
 			}
 		}
 	}
 
+	debug, _ = json.MarshalIndent(clientChangesToSync, "", "  ")
+	log.Printf("clientChangesToSync:\n%s", debug)
+
 	return s.appDeps.Client.SyncVault(
 		s.context.SelectedSoT.Address,
-		// clientChangesToSync,
-		localChanges,
+		clientChangesToSync,
 	)
 }
 
@@ -396,8 +389,6 @@ func (s *Service) UpdateVault(
 		&syncChangeID,
 		dbFile,
 	)
-
-	// fmt.Printf("Name %s", vault.Name)
 	if s.context.SelectedSoT.SyncMode == operationsEntity.SyncModeAuto {
 		err = s.SyncVault()
 		if err != nil {
@@ -738,31 +729,19 @@ func (s *Service) SyncRecord(
 		return err
 	}
 
-	// localChangesToSync := s.vaultrecordService.DiffRecordChanges(
-	// 	localChanges,
-	// 	clientChanges,
-	// )
-
 	if err := s.vaultrecordService.Sync(
 		authUser,
 		vaultDir,
 		s.context.SelectedSoT.ID,
 		vaultAccess.VaultID,
-		// localChangesToSync,
 		clientChanges,
 	); err != nil {
 		return err
 	}
 
-	// clientChangesToSync := s.vaultrecordService.DiffRecordChanges(
-	// 	clientChanges,
-	// 	localChanges,
-	// )
-
 	return s.appDeps.Client.SyncRecords(
 		s.context.SelectedSoT.Address,
 		vaultAccess.VaultID,
-		// clientChangesToSync,
 		localChanges,
 	)
 }
@@ -801,7 +780,6 @@ func (s *Service) getClientRecordChanges(
 	vaultID string,
 	lastChangeID string,
 ) ([]contract.PendingVaultRecordChange, error) {
-	// var changeCount int64
 	var result struct {
 		Count int64 `json:"count"`
 	}
