@@ -14,7 +14,6 @@ type SourceOfTruth struct {
 	Hostname       string          `json:"hostname"`
 	Address        string          `json:"address"`
 	AuthToken      string          `json:"auth_token"`
-	HashSync       string          `json:"hash_sync"`
 	SyncMode       SyncMode        `json:"sync_mode"`
 	KeyPair        keyring.KeyPair `json:"key_pair"`
 	TLSFingerprint string          `json:"tls_fingerprint"`

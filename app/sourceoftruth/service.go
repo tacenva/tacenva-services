@@ -257,7 +257,6 @@ func (s *Service) Create(
 			AuthToken:      response.AuthToken,
 			KeyPair:        keypair,
 			TLSFingerprint: fingerprint,
-			HashSync:       "",
 			SyncMode:       syncMode,
 		},
 	)

@@ -143,8 +143,6 @@ func (s *Service) List() ([]coreEntity.VaultAccess, bool, error) {
 			return vaList, false, err
 		}
 
-		// fmt.Printf("total 1: %d\n", totalChanges)
-
 		var result struct {
 			Count int64 `json:"count"`
 		}
@@ -158,7 +156,6 @@ func (s *Service) List() ([]coreEntity.VaultAccess, bool, error) {
 		}
 
 		totalChanges += result.Count
-		// fmt.Printf("total 2: %d\n", totalChanges)
 
 		return vaList, totalChanges > 0, nil
 	}
@@ -199,11 +196,6 @@ func (s *Service) SyncVault() error {
 		return err
 	}
 
-	clientChangesToSync := s.vaultService.MergePendingVaultChange(localChanges, clientChanges)
-
-	// debug, _ := json.MarshalIndent(clientChangesToSync, "", "  ")
-	// log.Printf("clientChangesToSync:\n%s", debug)
-
 	var permissionList []coreEntity.Permission
 	if err = s.appDeps.Client.ConnectedPublicKeys(
 		s.context.SelectedSoT.Address,
@@ -212,12 +204,8 @@ func (s *Service) SyncVault() error {
 		return err
 	}
 
-	// debug, _ = json.MarshalIndent(permissionList, "", "  ")
-	// log.Printf("permissionList:\n%s", debug)
-	// log.Printf("jumlah changes: %d", len(clientChangesToSync))
-
-	for changeIndex := range clientChangesToSync {
-		change := &clientChangesToSync[changeIndex]
+	for changeIndex := range localChanges {
+		change := &localChanges[changeIndex]
 
 		if change.SyncChange.Operation == "delete" {
 			continue
@@ -245,7 +233,6 @@ func (s *Service) SyncVault() error {
 				return err
 			}
 
-			// log.Printf("base: %s\ncomp: %s\n", permissionData.PublicKey, s.context.SelectedSoT.KeyPair.PublicKey)
 			if permissionData.PublicKey == s.context.SelectedSoT.KeyPair.PublicKey {
 				change.VaultAccessList[0].PermissionID = permissionData.ID
 			} else {
@@ -259,17 +246,10 @@ func (s *Service) SyncVault() error {
 		}
 	}
 
-	// debug, _ = json.MarshalIndent(clientChangesToSync, "", "  ")
-	// log.Printf("clientChangesToSync:\n%s", debug)
-
-	if err := s.appDeps.Client.SyncVault(
+	return s.appDeps.Client.SyncVault(
 		s.context.SelectedSoT.Address,
-		clientChangesToSync,
-	); err != nil {
-		return err
-	}
-
-	return s.vaultService.SetSyncStateToBeLastest(s.context.SelectedSoT.ID)
+		localChanges,
+	)
 }
 
 func (s *Service) CreateVault(
@@ -715,36 +695,20 @@ func (s *Service) SyncRecord(
 		return err
 	}
 
-	localChangesToSync := s.vaultrecordService.MergePendingVaultRecordChange(
-		clientChanges,
-		localChanges,
-	)
-
 	if err := s.vaultrecordService.Sync(
 		vaultDir,
 		s.context.SelectedSoT.ID,
 		vaultAccess.VaultID,
-		localChangesToSync,
+		clientChanges,
+		localChanges,
 	); err != nil {
 		return err
 	}
 
-	clientChangesToSync := s.vaultrecordService.MergePendingVaultRecordChange(
-		localChanges,
-		clientChanges,
-	)
-
-	if err := s.appDeps.Client.SyncRecords(
+	return s.appDeps.Client.SyncRecords(
 		s.context.SelectedSoT.Address,
 		vaultAccess.VaultID,
-		clientChangesToSync,
-	); err != nil {
-		return err
-	}
-
-	return s.vaultrecordService.SetSyncStateToBeLastest(
-		s.context.SelectedSoT.ID,
-		vaultAccess.VaultID,
+		localChanges,
 	)
 }
 
