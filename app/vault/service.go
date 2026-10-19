@@ -2,7 +2,6 @@ package vault
 
 import (
 	"errors"
-	"fmt"
 
 	"github.com/tacenva/database"
 	"github.com/tacenva/tacenva-services/app"
@@ -54,7 +53,7 @@ func NewService(
 func (s *Service) getLocalVaultChanges(
 	lastChangeID string,
 	vaultFile *database.DatabaseFile,
-) ([]contract.PendingVaultChange, error) {
+) (*contract.PendingVaultChange, error) {
 	changeCount, err := s.vaultService.GetChangeCount(
 		s.context.SelectedSoT.ID,
 		lastChangeID,
@@ -77,7 +76,7 @@ func (s *Service) getLocalVaultChanges(
 
 func (s *Service) getClientVaultChanges(
 	lastChangeID string,
-) ([]contract.PendingVaultChange, error) {
+) (*contract.PendingVaultChange, error) {
 	var result contract.PendingTotalChanges
 	err := s.appDeps.Client.GetVaultChangesCount(
 		s.context.SelectedSoT.Address,
@@ -92,19 +91,19 @@ func (s *Service) getClientVaultChanges(
 		return nil, nil
 	}
 
-	var changes []contract.PendingVaultChange
+	var pendingChange contract.PendingVaultChange
 
 	err = s.appDeps.Client.GetVaultChanges(
 		s.context.SelectedSoT.Address,
 		lastChangeID,
 		int(result.Count),
-		&changes,
+		&pendingChange,
 	)
 	if err != nil {
 		return nil, err
 	}
 
-	return changes, nil
+	return &pendingChange, nil
 }
 
 func (s *Service) List() ([]coreEntity.VaultAccess, bool, error) {
@@ -196,84 +195,89 @@ func (s *Service) SyncVault() error {
 		return err
 	}
 
-	var permissionList []coreEntity.Permission
-	if err = s.appDeps.Client.ConnectedPublicKeys(
-		s.context.SelectedSoT.Address,
-		&permissionList,
-	); err != nil {
-		return err
-	}
+	appliedClientChanges := s.vaultService.MergePendingVaultChange(
+		localChanges,
+		clientChanges,
+	)
 
-	for changeIndex := range localChanges {
-		change := &localChanges[changeIndex]
-
-		if change.SyncChange.Operation == "delete" {
-			continue
+	if appliedClientChanges != nil {
+		var permissionList []coreEntity.Permission
+		if err = s.appDeps.Client.ConnectedPublicKeys(
+			s.context.SelectedSoT.Address,
+			&permissionList,
+		); err != nil {
+			return err
 		}
 
-		if len(change.VaultAccessList) == 0 {
-			continue
-		}
-
-		keyPair := keyring.FromKeys(
+		nodeKeyPair := keyring.FromKeys(
 			s.context.SelectedSoT.KeyPair.PublicKey,
 			s.context.SelectedSoT.KeyPair.PrivateKey,
 		)
 
-		vaultKey, err := keyPair.Open(change.VaultAccessList[0].VaultKey)
-		if err != nil {
-			return err
-		}
+		for vaultID := range appliedClientChanges.VaultChangeDataList {
+			vaultChangeData := appliedClientChanges.VaultChangeDataList[vaultID]
+			if len(vaultChangeData.VaultAccessList) == 0 {
+				continue
+			}
 
-		for _, permissionData := range permissionList {
-			keyPair := keyring.FromPublicKey(permissionData.PublicKey)
+			firstVaultAccess := &vaultChangeData.VaultAccessList[0]
 
-			wrappedVaultKey, err := keyPair.Seal([]byte(vaultKey))
+			vaultKey, err := nodeKeyPair.Open(firstVaultAccess.VaultKey)
 			if err != nil {
 				return err
 			}
 
-			if permissionData.PublicKey == s.context.SelectedSoT.KeyPair.PublicKey {
-				change.VaultAccessList[0].PermissionID = permissionData.ID
-			} else {
-				access := coreEntity.VaultAccess{
-					VaultID:      change.Vault.ID,
-					PermissionID: permissionData.ID,
-					VaultKey:     wrappedVaultKey,
+			for _, permissionData := range permissionList {
+				vaultKeyPair := keyring.FromPublicKey(permissionData.PublicKey)
+
+				wrappedVaultKey, err := vaultKeyPair.Seal([]byte(vaultKey))
+				if err != nil {
+					return err
 				}
-				change.VaultAccessList = append(change.VaultAccessList, access)
+
+				if permissionData.PublicKey == s.context.SelectedSoT.KeyPair.PublicKey {
+					firstVaultAccess.PermissionID = permissionData.ID
+				} else {
+					access := coreEntity.VaultAccess{
+						VaultID:      vaultID,
+						PermissionID: permissionData.ID,
+						VaultKey:     wrappedVaultKey,
+					}
+					vaultChangeData.VaultAccessList = append(vaultChangeData.VaultAccessList, access)
+				}
 			}
-		}
-	}
 
-	if err := s.appDeps.Client.SyncVault(
-		s.context.SelectedSoT.Address,
-		localChanges,
-	); err != nil {
-		return err
-	}
-
-	// store untuk yang create
-	vaultDir := s.vaultDir()
-	db := database.New(vaultDir)
-	for _, change := range localChanges {
-		if change.SyncChange.Operation != "create" {
-			continue
+			appliedClientChanges.VaultChangeDataList[vaultID] = vaultChangeData
 		}
 
-		vaultID := change.SyncChange.EntityID
-
-		recordBlob, err := db.Read(vaultID)
-		if err != nil {
-			return err
-		}
-
-		if err := s.appDeps.Client.StoreRecordBlob(
+		if err := s.appDeps.Client.SyncVault(
 			s.context.SelectedSoT.Address,
-			vaultID,
-			recordBlob,
+			appliedClientChanges,
 		); err != nil {
 			return err
+		}
+
+		vaultDir := s.vaultDir()
+		db := database.New(vaultDir)
+		for _, change := range appliedClientChanges.SyncChanges {
+			if change.Operation != "create" {
+				continue
+			}
+
+			vaultID := change.EntityID
+
+			recordBlob, err := db.Read(vaultID)
+			if err != nil {
+				return err
+			}
+
+			if err := s.appDeps.Client.StoreRecordBlob(
+				s.context.SelectedSoT.Address,
+				vaultID,
+				recordBlob,
+			); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -733,10 +737,15 @@ func (s *Service) SyncRecord(
 		return err
 	}
 
+	appliedClientChanges := s.vaultrecordService.MergePendingVaultRecordChange(
+		localChanges,
+		clientChanges,
+	)
+
 	if err := s.appDeps.Client.SyncRecords(
 		s.context.SelectedSoT.Address,
 		vaultAccess.VaultID,
-		localChanges,
+		appliedClientChanges,
 	); err != nil {
 		return err
 	}
@@ -751,7 +760,7 @@ func (s *Service) getLocalRecordChanges(
 	vaultDir string,
 	vaultID string,
 	lastChangeID string,
-) ([]contract.PendingVaultRecordChange, error) {
+) (*contract.PendingVaultRecordChange, error) {
 	changeCount, err := s.vaultrecordService.GetChangeCount(
 		s.context.SelectedSoT.ID,
 		vaultID,
@@ -777,7 +786,7 @@ func (s *Service) getLocalRecordChanges(
 func (s *Service) getClientRecordChanges(
 	vaultID string,
 	lastChangeID string,
-) ([]contract.PendingVaultRecordChange, error) {
+) (*contract.PendingVaultRecordChange, error) {
 	var result contract.PendingTotalChanges
 
 	err := s.appDeps.Client.GetRecordChangesCount(
@@ -794,20 +803,20 @@ func (s *Service) getClientRecordChanges(
 		return nil, nil
 	}
 
-	var changes []contract.PendingVaultRecordChange
+	var pendingChange contract.PendingVaultRecordChange
 
 	err = s.appDeps.Client.GetRecordChanges(
 		s.context.SelectedSoT.Address,
 		vaultID,
 		lastChangeID,
 		int(result.Count),
-		&changes,
+		&pendingChange,
 	)
 	if err != nil {
 		return nil, err
 	}
 
-	return changes, nil
+	return &pendingChange, nil
 }
 
 func (s *Service) authUser() (*coreEntity.User, error) {
@@ -873,7 +882,6 @@ func (s *Service) ListRecord(
 	}
 
 	if vaultAccess.VaultID == "" {
-		fmt.Println("Di sini?")
 		return nil, false, errors.New(
 			"vault id cannot be empty",
 		)
