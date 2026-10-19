@@ -80,7 +80,7 @@ func (c *Client) SyncVault(
 	)
 }
 
-func (c *Client) RecordBlob(
+func (c *Client) GetRecordBlob(
 	address string,
 	vaultID string,
 ) ([]byte, error) {
@@ -95,6 +95,26 @@ func (c *Client) RecordBlob(
 		path,
 		nil,
 	)
+}
+
+func (c *Client) StoreRecordBlob(
+	address string,
+	vaultID string,
+	data []byte,
+) error {
+	path := fmt.Sprintf(
+		"/vault/%s/record/blob",
+		vaultID,
+	)
+
+	_, err := c.doRaw(
+		http.MethodPost,
+		address,
+		path,
+		data,
+	)
+
+	return err
 }
 
 func (c *Client) GetRecordChanges(

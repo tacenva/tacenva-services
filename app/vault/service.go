@@ -246,10 +246,38 @@ func (s *Service) SyncVault() error {
 		}
 	}
 
-	return s.appDeps.Client.SyncVault(
+	if err := s.appDeps.Client.SyncVault(
 		s.context.SelectedSoT.Address,
 		localChanges,
-	)
+	); err != nil {
+		return err
+	}
+
+	// store untuk yang create
+	vaultDir := s.vaultDir()
+	db := database.New(vaultDir)
+	for _, change := range localChanges {
+		if change.SyncChange.Operation != "create" {
+			continue
+		}
+
+		vaultID := change.SyncChange.EntityID
+
+		recordBlob, err := db.Read(vaultID)
+		if err != nil {
+			return err
+		}
+
+		if err := s.appDeps.Client.StoreRecordBlob(
+			s.context.SelectedSoT.Address,
+			vaultID,
+			recordBlob,
+		); err != nil {
+			return err
+		}
+	}
+
+	return s.vaultService.SetSyncStateToBeLastest(s.context.SelectedSoT.ID)
 }
 
 func (s *Service) CreateVault(
@@ -705,10 +733,17 @@ func (s *Service) SyncRecord(
 		return err
 	}
 
-	return s.appDeps.Client.SyncRecords(
+	if err := s.appDeps.Client.SyncRecords(
 		s.context.SelectedSoT.Address,
 		vaultAccess.VaultID,
 		localChanges,
+	); err != nil {
+		return err
+	}
+
+	return s.vaultrecordService.SetSyncStateToBeLastest(
+		s.context.SelectedSoT.ID,
+		vaultAccess.VaultID,
 	)
 }
 
@@ -869,7 +904,7 @@ func (s *Service) ListRecord(
 	)
 	if err != nil {
 		if err == database.ErrFileNotFound && s.context.IsRemote {
-			recordBlob, err := s.appDeps.Client.RecordBlob(
+			recordBlob, err := s.appDeps.Client.GetRecordBlob(
 				s.context.SelectedSoT.Address,
 				vaultAccess.VaultID,
 			)
