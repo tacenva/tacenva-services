@@ -126,7 +126,7 @@ func (s *Service) ChangePassword(
 
 	if err := s.sotFile.FindAll(
 		&sotList,
-	); err != nil {
+	).Err; err != nil {
 		return err
 	}
 
@@ -368,7 +368,7 @@ func (s *Service) List() (
 
 	if err := s.sotFile.FindAll(
 		&sotData,
-	); err != nil {
+	).Err; err != nil {
 		return nil, err
 	}
 
