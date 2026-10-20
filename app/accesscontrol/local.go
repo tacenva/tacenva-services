@@ -66,82 +66,50 @@ func (s *localService) Get(
 }
 
 func (s *localService) Create(
-	name string,
-	privilege entity.Privilege,
-	group string,
+	permission *entity.Permission,
 ) ([]entity.VaultAccess, *entity.Permission, *keyring.KeyPair, error) {
 	authUser, err := s.authUser()
 	if err != nil {
 		return nil, nil, nil, err
 	}
 
+	if permission == nil {
+		return nil, nil, nil, fmt.Errorf("permission is required")
+	}
+
 	return s.coreACService.Create(
 		authUser,
-		name,
-		privilege,
-		group,
+		permission.Name,
+		permission.Privilege,
+		&permission.Group,
+		permission.AutoApprove,
 	)
 }
 
-func (s *localService) ChangeName(
-	id string,
-	name string,
+func (s *localService) Update(
+	permission *entity.Permission,
 ) error {
 	authUser, err := s.authUser()
 	if err != nil {
 		return err
 	}
 
-	return s.coreACService.ChangeName(
-		authUser,
-		id,
-		name,
-	)
+	return s.coreACService.Update(authUser, permission)
 }
 
-func (s *localService) ChangeGroup(
+func (s *localService) SetRevoked(
 	id string,
-	group string,
+	revoked bool,
 ) error {
 	authUser, err := s.authUser()
 	if err != nil {
 		return err
 	}
 
-	return s.coreACService.ChangeGroup(
+	return s.coreACService.SetRevoked(
 		authUser,
 		id,
-		group,
-	)
-}
-
-func (s *localService) ChangePrivilege(
-	id string,
-	privilege entity.Privilege,
-) error {
-	authUser, err := s.authUser()
-	if err != nil {
-		return err
-	}
-
-	return s.coreACService.ChangePrivilege(
-		authUser,
-		id,
-		privilege,
-	)
-}
-
-func (s *localService) Revoke(
-	id string,
-) error {
-	authUser, err := s.authUser()
-	if err != nil {
-		return err
-	}
-
-	return s.coreACService.Revoke(
-		authUser,
-		id,
+		revoked,
 	)
 }
 
@@ -199,4 +167,33 @@ func (s *localService) DeleteAccessControl(
 		authUser,
 		id,
 	)
+}
+
+func (s *localService) ListGroups() ([]entity.PermissionGroup, error) {
+	authUser, err := s.authUser()
+	if err != nil {
+		return nil, err
+	}
+
+	return s.coreACService.GetGroups(authUser)
+}
+
+func (s *localService) UpdateGroup(
+	group *entity.PermissionGroup,
+) error {
+	authUser, err := s.authUser()
+	if err != nil {
+		return err
+	}
+
+	return s.coreACService.UpdateGroup(authUser, group)
+}
+
+func (s *localService) DeleteGroup(groupID string) error {
+	authUser, err := s.authUser()
+	if err != nil {
+		return err
+	}
+
+	return s.coreACService.DeleteGroup(authUser, groupID)
 }

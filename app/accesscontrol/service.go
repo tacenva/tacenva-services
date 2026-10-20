@@ -56,53 +56,34 @@ func (s *Service) Get(
 }
 
 func (s *Service) Create(
-	name string,
-	privilege entity.Privilege,
-	group string,
+	permission *entity.Permission,
 ) ([]entity.VaultAccess, *entity.Permission, *keyring.KeyPair, error) {
 	if s.context.IsRemote {
-		return s.remoteService.Create(name, privilege, group)
+		return s.remoteService.Create(permission)
 	}
-	return s.localService.Create(name, privilege, group)
+
+	return s.localService.Create(permission)
 }
 
-func (s *Service) ChangeName(
-	id string,
-	name string,
+func (s *Service) Update(
+	permission *entity.Permission,
 ) error {
 	if s.context.IsRemote {
-		return s.remoteService.ChangeName(id, name)
+		return s.remoteService.Update(permission)
 	}
-	return s.localService.ChangeName(id, name)
+
+	return s.localService.Update(permission)
 }
 
-func (s *Service) ChangeGroup(
+func (s *Service) SetRevoked(
 	id string,
-	group string,
+	revoked bool,
 ) error {
 	if s.context.IsRemote {
-		return s.remoteService.ChangeGroup(id, group)
+		return s.remoteService.SetRevoked(id, revoked)
 	}
-	return s.localService.ChangeGroup(id, group)
-}
 
-func (s *Service) ChangePrivilege(
-	id string,
-	privilege entity.Privilege,
-) error {
-	if s.context.IsRemote {
-		return s.remoteService.ChangePrivilege(id, privilege)
-	}
-	return s.localService.ChangePrivilege(id, privilege)
-}
-
-func (s *Service) Revoke(
-	id string,
-) error {
-	if s.context.IsRemote {
-		return s.remoteService.Revoke(id)
-	}
-	return s.localService.Revoke(id)
+	return s.localService.SetRevoked(id, revoked)
 }
 
 func (s *Service) UserList(
@@ -139,4 +120,30 @@ func (s *Service) DeleteAccessControl(
 		return s.remoteService.DeleteAccessControl(id)
 	}
 	return s.localService.DeleteAccessControl(id)
+}
+
+func (s *Service) ListGroups() ([]entity.PermissionGroup, error) {
+	if s.context.IsRemote {
+		return s.remoteService.ListGroups()
+	}
+
+	return s.localService.ListGroups()
+}
+
+func (s *Service) UpdateGroup(
+	group *entity.PermissionGroup,
+) error {
+	if s.context.IsRemote {
+		return s.remoteService.UpdateGroup(group)
+	}
+
+	return s.localService.UpdateGroup(group)
+}
+
+func (s *Service) DeleteGroup(groupID string) error {
+	if s.context.IsRemote {
+		return s.remoteService.DeleteGroup(groupID)
+	}
+
+	return s.localService.DeleteGroup(groupID)
 }

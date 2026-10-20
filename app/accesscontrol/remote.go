@@ -47,9 +47,7 @@ func (s *remoteService) Get(
 }
 
 func (s *remoteService) Create(
-	name string,
-	privilege entity.Privilege,
-	group string,
+	permission *entity.Permission,
 ) ([]entity.VaultAccess, *entity.Permission, *keyring.KeyPair, error) {
 	if s.context.SelectedSoT == nil {
 		return nil, nil, nil, fmt.Errorf(
@@ -57,11 +55,13 @@ func (s *remoteService) Create(
 		)
 	}
 
+	if permission == nil {
+		return nil, nil, nil, fmt.Errorf("permission is required")
+	}
+
 	result, err := s.appDeps.Client.CreateAccessControl(
 		s.context.SelectedSoT.Address,
-		name,
-		privilege,
-		group,
+		permission,
 	)
 	if err != nil {
 		return nil, nil, nil, err
@@ -70,65 +70,31 @@ func (s *remoteService) Create(
 	return result.VaultAccessList, result.Permission, result.KeyPair, nil
 }
 
-func (s *remoteService) ChangeName(
-	id string,
-	name string,
+func (s *remoteService) Update(
+	permission *entity.Permission,
 ) error {
 	if s.context.SelectedSoT == nil {
 		return fmt.Errorf("selected source of truth is nil")
 	}
 
-	return s.appDeps.Client.ChangeAccessControlName(
+	return s.appDeps.Client.UpdateAccessControl(
 		s.context.SelectedSoT.Address,
-		id,
-		name,
+		permission,
 	)
 }
 
-func (s *remoteService) ChangeGroup(
+func (s *remoteService) SetRevoked(
 	id string,
-	group string,
+	revoked bool,
 ) error {
 	if s.context.SelectedSoT == nil {
 		return fmt.Errorf("selected source of truth is nil")
 	}
 
-	return s.appDeps.Client.ChangeAccessControlGroup(
+	return s.appDeps.Client.SetRevokedAccessControl(
 		s.context.SelectedSoT.Address,
 		id,
-		group,
-	)
-}
-
-func (s *remoteService) ChangePrivilege(
-	id string,
-	privilege entity.Privilege,
-) error {
-	if s.context.SelectedSoT == nil {
-		return fmt.Errorf(
-			"selected source of truth is nil",
-		)
-	}
-
-	return s.appDeps.Client.ChangeAccessControlPrivilege(
-		s.context.SelectedSoT.Address,
-		id,
-		privilege,
-	)
-}
-
-func (s *remoteService) Revoke(
-	id string,
-) error {
-	if s.context.SelectedSoT == nil {
-		return fmt.Errorf(
-			"selected source of truth is nil",
-		)
-	}
-
-	return s.appDeps.Client.RevokeAccessControl(
-		s.context.SelectedSoT.Address,
-		id,
+		revoked,
 	)
 }
 
@@ -196,5 +162,39 @@ func (s *remoteService) GrantPrivilege(
 	return s.appDeps.Client.GrantVaultAccess(
 		s.context.SelectedSoT.Address,
 		vaultAccessList,
+	)
+}
+
+func (s *remoteService) ListGroups() ([]entity.PermissionGroup, error) {
+	if s.context.SelectedSoT == nil {
+		return nil, fmt.Errorf("selected source of truth is nil")
+	}
+
+	return s.appDeps.Client.ListAccessControlGroups(
+		s.context.SelectedSoT.Address,
+	)
+}
+
+func (s *remoteService) UpdateGroup(
+	group *entity.PermissionGroup,
+) error {
+	if s.context.SelectedSoT == nil {
+		return fmt.Errorf("selected source of truth is nil")
+	}
+
+	return s.appDeps.Client.UpdateAccessControlGroup(
+		s.context.SelectedSoT.Address,
+		group,
+	)
+}
+
+func (s *remoteService) DeleteGroup(groupID string) error {
+	if s.context.SelectedSoT == nil {
+		return fmt.Errorf("selected source of truth is nil")
+	}
+
+	return s.appDeps.Client.DeleteAccessControlGroup(
+		s.context.SelectedSoT.Address,
+		groupID,
 	)
 }

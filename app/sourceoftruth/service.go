@@ -250,6 +250,56 @@ func (s *Service) Create(
 		sotHostname = hostnameAlias
 	}
 
+	baseHostname := sotHostname
+
+	var existingSots []entity.SourceOfTruth
+	err = s.sotFile.FindWhere(&existingSots, func(m map[string]any) bool {
+		hostname, ok := m["Hostname"].(string)
+		if !ok {
+			return false
+		}
+
+		if hostname == baseHostname {
+			return true
+		}
+
+		prefix := baseHostname + "-"
+		if !strings.HasPrefix(hostname, prefix) {
+			return false
+		}
+
+		suffix := strings.TrimPrefix(hostname, prefix)
+		_, err := strconv.Atoi(suffix)
+		return err == nil
+	}).Err
+	if err != nil {
+		return "", err
+	}
+
+	used := make(map[int]struct{}, len(existingSots))
+	hostnameExists := false
+
+	for _, sot := range existingSots {
+		if sot.Hostname == baseHostname {
+			hostnameExists = true
+			continue
+		}
+
+		suffix := strings.TrimPrefix(sot.Hostname, baseHostname+"-")
+		if n, err := strconv.Atoi(suffix); err == nil && n > 0 {
+			used[n] = struct{}{}
+		}
+	}
+
+	if hostnameExists {
+		for i := 1; ; i++ {
+			if _, exists := used[i]; !exists {
+				sotHostname = fmt.Sprintf("%s-%d", baseHostname, i)
+				break
+			}
+		}
+	}
+
 	return s.sotFile.Insert(
 		&entity.SourceOfTruth{
 			Hostname:       sotHostname,
@@ -367,7 +417,7 @@ func (s *Service) List() (
 
 	if err := s.sotFile.FindAll(
 		&sotData,
-	).Err; err != nil {
+	).Order("ID ASC").Err; err != nil {
 		return nil, err
 	}
 

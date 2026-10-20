@@ -64,26 +64,17 @@ func (c *Client) GetAccessControl(
 
 func (c *Client) CreateAccessControl(
 	address string,
-	name string,
-	privilege entity.Privilege,
-	group string,
+	permission *entity.Permission,
 ) (*AccessControlCreateResponse, error) {
-	name = strings.TrimSpace(name)
-
-	if name == "" {
-		return nil, fmt.Errorf(
-			"access control name is required",
-		)
+	if permission == nil {
+		return nil, fmt.Errorf("permission is required")
 	}
 
-	request := struct {
-		Name      string           `json:"name"`
-		Privilege entity.Privilege `json:"privilege"`
-		Group     string           `json:"group"`
-	}{
-		Name:      name,
-		Privilege: privilege,
-		Group:     group,
+	permission.Name = strings.TrimSpace(permission.Name)
+	permission.Group.Name = strings.TrimSpace(permission.Group.Name)
+
+	if permission.Name == "" {
+		return nil, fmt.Errorf("access control name is required")
 	}
 
 	var response AccessControlCreateResponse
@@ -91,140 +82,73 @@ func (c *Client) CreateAccessControl(
 	if err := c.Post(
 		address,
 		"/access-control",
-		request,
+		permission,
 		&response,
 	); err != nil {
-		return nil, fmt.Errorf(
-			"create access control: %w",
-			err,
-		)
+		return nil, fmt.Errorf("create access control: %w", err)
 	}
 
 	return &response, nil
 }
 
-func (c *Client) ChangeAccessControlName(
+func (c *Client) UpdateAccessControl(
 	address string,
-	id string,
-	name string,
+	permission *entity.Permission,
 ) error {
-	id = strings.TrimSpace(id)
-	name = strings.TrimSpace(name)
+	if permission == nil {
+		return fmt.Errorf("permission is required")
+	}
 
-	if id == "" {
+	permission.ID = strings.TrimSpace(permission.ID)
+	permission.Name = strings.TrimSpace(permission.Name)
+	permission.Group.ID = strings.TrimSpace(permission.Group.ID)
+	permission.Group.Name = strings.TrimSpace(permission.Group.Name)
+
+	if permission.ID == "" {
 		return fmt.Errorf("access control id is required")
 	}
 
-	if name == "" {
+	if permission.Name == "" {
 		return fmt.Errorf("access control name is required")
 	}
 
-	request := struct {
-		Name string `json:"name"`
-	}{
-		Name: name,
-	}
-
-	if err := c.Patch(
+	if err := c.Put(
 		address,
-		"/access-control/"+url.PathEscape(id)+"/name",
-		request,
+		"/access-control/"+url.PathEscape(permission.ID),
+		permission,
 		nil,
 	); err != nil {
-		return fmt.Errorf("change access control name: %w", err)
+		return fmt.Errorf("update access control: %w", err)
 	}
 
 	return nil
 }
 
-func (c *Client) ChangeAccessControlGroup(
+func (c *Client) SetRevokedAccessControl(
 	address string,
 	id string,
-	group string,
+	revoked bool,
 ) error {
 	id = strings.TrimSpace(id)
-	group = strings.TrimSpace(group)
 
 	if id == "" {
 		return fmt.Errorf("access control id is required")
 	}
 
-	if group == "" {
-		return fmt.Errorf("access control group is required")
-	}
-
 	request := struct {
-		Group string `json:"group"`
+		Revoked bool `json:"revoked"`
 	}{
-		Group: group,
+		Revoked: revoked,
 	}
 
 	if err := c.Patch(
-		address,
-		"/access-control/"+url.PathEscape(id)+"/group",
-		request,
-		nil,
-	); err != nil {
-		return fmt.Errorf("change access control group: %w", err)
-	}
-
-	return nil
-}
-
-func (c *Client) ChangeAccessControlPrivilege(
-	address string,
-	id string,
-	privilege entity.Privilege,
-) error {
-	id = strings.TrimSpace(id)
-
-	if id == "" {
-		return fmt.Errorf(
-			"access control id is required",
-		)
-	}
-
-	request := struct {
-		Privilege entity.Privilege `json:"privilege"`
-	}{
-		Privilege: privilege,
-	}
-
-	if err := c.Patch(
-		address,
-		"/access-control/"+url.PathEscape(id)+"/privilege",
-		request,
-		nil,
-	); err != nil {
-		return fmt.Errorf(
-			"change access control privilege: %w",
-			err,
-		)
-	}
-
-	return nil
-}
-
-func (c *Client) RevokeAccessControl(
-	address string,
-	id string,
-) error {
-	id = strings.TrimSpace(id)
-
-	if id == "" {
-		return fmt.Errorf(
-			"access control id is required",
-		)
-	}
-
-	if err := c.Post(
 		address,
 		"/access-control/"+url.PathEscape(id)+"/revoke",
-		nil,
+		request,
 		nil,
 	); err != nil {
 		return fmt.Errorf(
-			"revoke access control: %w",
+			"set access control revoked status: %w",
 			err,
 		)
 	}
@@ -362,6 +286,83 @@ func (c *Client) GrantVaultAccess(
 	); err != nil {
 		return fmt.Errorf(
 			"grant vault access: %w",
+			err,
+		)
+	}
+
+	return nil
+}
+
+func (c *Client) ListAccessControlGroups(
+	address string,
+) ([]entity.PermissionGroup, error) {
+	var groups []entity.PermissionGroup
+
+	if err := c.Get(
+		address,
+		"/access-control/groups",
+		&groups,
+	); err != nil {
+		return nil, fmt.Errorf(
+			"list access control groups: %w",
+			err,
+		)
+	}
+
+	return groups, nil
+}
+
+func (c *Client) UpdateAccessControlGroup(
+	address string,
+	group *entity.PermissionGroup,
+) error {
+	if group == nil {
+		return fmt.Errorf("permission group is required")
+	}
+
+	group.ID = strings.TrimSpace(group.ID)
+	group.Name = strings.TrimSpace(group.Name)
+
+	if group.ID == "" {
+		return fmt.Errorf("permission group id is required")
+	}
+
+	if group.Name == "" {
+		return fmt.Errorf("permission group name is required")
+	}
+
+	if err := c.Put(
+		address,
+		"/access-control/groups/"+url.PathEscape(group.ID),
+		group,
+		nil,
+	); err != nil {
+		return fmt.Errorf(
+			"update access control group: %w",
+			err,
+		)
+	}
+
+	return nil
+}
+
+func (c *Client) DeleteAccessControlGroup(
+	address string,
+	groupID string,
+) error {
+	groupID = strings.TrimSpace(groupID)
+
+	if groupID == "" {
+		return fmt.Errorf("permission group id is required")
+	}
+
+	if err := c.Delete(
+		address,
+		"/access-control/groups/"+url.PathEscape(groupID),
+		nil,
+	); err != nil {
+		return fmt.Errorf(
+			"delete access control group: %w",
 			err,
 		)
 	}
