@@ -1,7 +1,6 @@
 package sourceoftruth
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -18,6 +17,7 @@ import (
 	"github.com/tacenva/tacpass-core/accesscontrol"
 	"github.com/tacenva/tacpass-core/auth"
 	"github.com/tacenva/tacpass-core/config"
+	"github.com/tacenva/tacpass-core/contract"
 	coreEntity "github.com/tacenva/tacpass-core/entity"
 	"github.com/tacenva/tacpass-core/util/keyring"
 )
@@ -48,22 +48,24 @@ func NewService(
 func (s *Service) Initialize(
 	name string,
 	hostname string,
-) (string, *keyring.KeyPair, error) {
-	_, keyPair, err := s.accessControlService.InitAdminPrivilege(name)
+) (*contract.EnrollResponse, *keyring.KeyPair, error) {
+	_, keyPair, err := s.accessControlService.InitAdminPrivilege(name, s.appDeps.Config.SotID)
 	if err != nil {
-		return "", nil, err
+		return nil, nil, err
 	}
 
-	_, token, err := s.authService.Enroll(
-		hostname,
-		keyPair.PublicKey,
+	response, err := s.authService.Enroll(
+		&contract.EnrollRequest{
+			Hostname:  hostname,
+			PublicKey: keyPair.PublicKey,
+		},
 		coreEntity.UserStatusApproved,
 	)
 	if err != nil {
-		return "", nil, err
+		return nil, nil, err
 	}
 
-	return token, keyPair, nil
+	return response, keyPair, nil
 }
 
 func (s *Service) Access(
@@ -86,7 +88,7 @@ func (s *Service) Access(
 			return err
 		}
 
-		token, keyPair, err := s.Initialize(
+		result, keyPair, err := s.Initialize(
 			string(coreEntity.PrivilegeAdmin),
 			hostname,
 		)
@@ -94,16 +96,18 @@ func (s *Service) Access(
 			return err
 		}
 
-		_, err = s.sotFile.Insert(
+		if err := s.sotFile.Insert(
 			&entity.SourceOfTruth{
-				ID:        s.appDeps.Config.SoTULID,
-				Hostname:  hostname,
-				Address:   "localhost",
-				AuthToken: token,
-				KeyPair:   *keyPair,
+				ID:       s.appDeps.Config.SotID,
+				Hostname: hostname,
+				Address:  "localhost",
+
+				AuthToken:  result.AuthToken,
+				UserStatus: result.Status,
+				KeyPair:    *keyPair,
+				GroupID:    result.GroupAssignment.ID,
 			},
-		)
-		if err != nil {
+		).Error; err != nil {
 			return err
 		}
 	}
@@ -126,7 +130,7 @@ func (s *Service) ChangePassword(
 
 	if err := s.sotFile.FindAll(
 		&sotList,
-	).Err; err != nil {
+	).Error; err != nil {
 		return err
 	}
 
@@ -235,7 +239,7 @@ func (s *Service) Create(
 
 	response, err := s.appDeps.Client.Enroll(
 		address,
-		api.EnrollRequest{
+		contract.EnrollRequest{
 			Hostname:  hostname,
 			PublicKey: keypair.PublicKey,
 		},
@@ -271,7 +275,7 @@ func (s *Service) Create(
 		suffix := strings.TrimPrefix(hostname, prefix)
 		_, err := strconv.Atoi(suffix)
 		return err == nil
-	}).Err
+	}).Error
 	if err != nil {
 		return "", err
 	}
@@ -300,16 +304,27 @@ func (s *Service) Create(
 		}
 	}
 
-	return s.sotFile.Insert(
+	result := s.sotFile.Insert(
 		&entity.SourceOfTruth{
-			Hostname:       sotHostname,
-			Address:        address,
-			AuthToken:      response.AuthToken,
-			KeyPair:        keypair,
+			Hostname: sotHostname,
+			Address:  address,
+			SyncMode: syncMode,
+
+			AuthToken:  response.AuthToken,
+			UserStatus: response.Status,
+			KeyPair:    keypair,
+			GroupID:    response.GroupAssignment.ID,
+
 			TLSFingerprint: fingerprint,
-			SyncMode:       syncMode,
 		},
 	)
+
+	err = s.accessControlService.SyncGroups(result.ID, response.GroupAssignment.Items)
+	if err != nil {
+		return "", err
+	}
+
+	return result.ID, result.Error
 }
 
 func (s *Service) Update(
@@ -331,7 +346,7 @@ func (s *Service) Update(
 
 	return s.sotFile.Update(
 		updatedSoT,
-	)
+	).Error
 }
 
 // ResetTLSFingerprint menghapus fingerprint TLS yang tersimpan
@@ -417,7 +432,7 @@ func (s *Service) List() (
 
 	if err := s.sotFile.FindAll(
 		&sotData,
-	).Order("ID ASC").Err; err != nil {
+	).Order("ID ASC").Error; err != nil {
 		return nil, err
 	}
 
@@ -442,21 +457,21 @@ func (s *Service) List() (
 	return sotData, nil
 }
 
-func (s *Service) Del(
+func (s *Service) Delete(
 	sot *entity.SourceOfTruth,
-) (*entity.SourceOfTruth, error) {
+) error {
 	if s.sotFile == nil {
-		return nil, ErrForbidden
+		return ErrForbidden
 	}
 
 	if sot == nil {
-		return nil, errors.New(
+		return errors.New(
 			"source of truth cannot be nil",
 		)
 	}
 
 	if sot.ID == "" {
-		return nil, errors.New(
+		return errors.New(
 			"source of truth id cannot be empty",
 		)
 	}
@@ -468,30 +483,30 @@ func (s *Service) Del(
 		&stored,
 	)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	if stored.Address == "localhost" {
-		return nil, errors.New(
+		return errors.New(
 			"deleting localhost is prohibited",
 		)
 	}
 
-	oldData, err := s.sotFile.Delete(
+	return s.sotFile.Delete(
 		stored.ID,
-	)
-	if err != nil {
-		return nil, err
-	}
+	).Error
+	// if err != nil {
+	// 	return err
+	// }
 
-	var deleted entity.SourceOfTruth
+	// var deleted entity.SourceOfTruth
 
-	if err := json.Unmarshal(
-		oldData,
-		&deleted,
-	); err != nil {
-		return nil, err
-	}
+	// if err := json.Unmarshal(
+	// 	oldData,
+	// 	&deleted,
+	// ); err != nil {
+	// 	return err
+	// }
 
-	return &deleted, nil
+	// return &deleted, nil
 }

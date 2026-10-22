@@ -51,30 +51,16 @@ func (s *localService) List() ([]entity.Permission, error) {
 	return s.coreACService.List(authUser)
 }
 
-func (s *localService) Get(
-	id string,
-) (*entity.Permission, error) {
-	authUser, err := s.authUser()
-	if err != nil {
-		return nil, err
-	}
-
-	return s.coreACService.Get(
-		authUser,
-		id,
-	)
-}
-
 func (s *localService) Create(
 	permission *entity.Permission,
-) ([]entity.VaultAccess, *entity.Permission, *keyring.KeyPair, error) {
+) (*entity.Permission, *keyring.KeyPair, error) {
 	authUser, err := s.authUser()
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 
 	if permission == nil {
-		return nil, nil, nil, fmt.Errorf("permission is required")
+		return nil, nil, fmt.Errorf("permission is required")
 	}
 
 	return s.coreACService.Create(
@@ -83,6 +69,7 @@ func (s *localService) Create(
 		permission.Privilege,
 		&permission.Group,
 		permission.AutoApprove,
+		s.context.SelectedSoT.ID,
 	)
 }
 
@@ -94,12 +81,13 @@ func (s *localService) Update(
 		return err
 	}
 
-	return s.coreACService.Update(authUser, permission)
+	return s.coreACService.Update(authUser, permission, permission.SotID)
 }
 
 func (s *localService) SetRevoked(
 	id string,
 	revoked bool,
+	sotID string,
 ) error {
 	authUser, err := s.authUser()
 	if err != nil {
@@ -109,12 +97,14 @@ func (s *localService) SetRevoked(
 	return s.coreACService.SetRevoked(
 		authUser,
 		id,
+		sotID,
 		revoked,
 	)
 }
 
 func (s *localService) UserList(
 	permissionID string,
+	sotID string,
 ) ([]entity.User, error) {
 	authUser, err := s.authUser()
 	if err != nil {
@@ -124,11 +114,13 @@ func (s *localService) UserList(
 	return s.coreACService.UserList(
 		authUser,
 		permissionID,
+		sotID,
 	)
 }
 
 func (s *localService) ApproveUser(
 	userID string,
+	sotID string,
 ) (*entity.User, error) {
 	authUser, err := s.authUser()
 	if err != nil {
@@ -138,11 +130,13 @@ func (s *localService) ApproveUser(
 	return s.coreACService.ApproveUser(
 		authUser,
 		userID,
+		sotID,
 	)
 }
 
 func (s *localService) RevokeUser(
 	userID string,
+	sotID string,
 ) (*entity.User, error) {
 	authUser, err := s.authUser()
 	if err != nil {
@@ -152,11 +146,13 @@ func (s *localService) RevokeUser(
 	return s.coreACService.RevokeUser(
 		authUser,
 		userID,
+		sotID,
 	)
 }
 
 func (s *localService) DeleteAccessControl(
 	id string,
+	sotID string,
 ) error {
 	authUser, err := s.authUser()
 	if err != nil {
@@ -166,34 +162,36 @@ func (s *localService) DeleteAccessControl(
 	return s.coreACService.DeletePermission(
 		authUser,
 		id,
+		sotID,
 	)
 }
 
-func (s *localService) ListGroups() ([]entity.PermissionGroup, error) {
-	authUser, err := s.authUser()
-	if err != nil {
-		return nil, err
-	}
+// func (s *localService) ListGroups() ([]entity.PermissionGroup, error) {
+// 	authUser, err := s.authUser()
+// 	if err != nil {
+// 		return nil, err
+// 	}
 
-	return s.coreACService.GetGroups(authUser)
-}
+// 	return s.coreACService.GetGroupDescendants(authUser)
+// }
 
 func (s *localService) UpdateGroup(
 	group *entity.PermissionGroup,
+	sotID string,
 ) error {
 	authUser, err := s.authUser()
 	if err != nil {
 		return err
 	}
 
-	return s.coreACService.UpdateGroup(authUser, group)
+	return s.coreACService.UpdateGroup(authUser, group, sotID)
 }
 
-func (s *localService) DeleteGroup(groupID string) error {
+func (s *localService) DeleteGroup(groupID string, sotID string) error {
 	authUser, err := s.authUser()
 	if err != nil {
 		return err
 	}
 
-	return s.coreACService.DeleteGroup(authUser, groupID)
+	return s.coreACService.DeleteGroup(authUser, groupID, sotID)
 }

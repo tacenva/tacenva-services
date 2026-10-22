@@ -34,33 +34,33 @@ func (c *Client) ListAccessControls(
 	return permissions, nil
 }
 
-func (c *Client) GetAccessControl(
-	address string,
-	id string,
-) (*entity.Permission, error) {
-	id = strings.TrimSpace(id)
+// func (c *Client) GetAccessControl(
+// 	address string,
+// 	id string,
+// ) (*entity.Permission, error) {
+// 	id = strings.TrimSpace(id)
 
-	if id == "" {
-		return nil, fmt.Errorf(
-			"access control id is required",
-		)
-	}
+// 	if id == "" {
+// 		return nil, fmt.Errorf(
+// 			"access control id is required",
+// 		)
+// 	}
 
-	var permission entity.Permission
+// 	var permission entity.Permission
 
-	if err := c.Get(
-		address,
-		"/access-control/"+url.PathEscape(id),
-		&permission,
-	); err != nil {
-		return nil, fmt.Errorf(
-			"get access control: %w",
-			err,
-		)
-	}
+// 	if err := c.Get(
+// 		address,
+// 		"/access-control/"+url.PathEscape(id),
+// 		&permission,
+// 	); err != nil {
+// 		return nil, fmt.Errorf(
+// 			"get access control: %w",
+// 			err,
+// 		)
+// 	}
 
-	return &permission, nil
-}
+// 	return &permission, nil
+// }
 
 func (c *Client) CreateAccessControl(
 	address string,

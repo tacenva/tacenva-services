@@ -2,6 +2,7 @@ package vault
 
 import (
 	"errors"
+	"slices"
 
 	"github.com/tacenva/database"
 	"github.com/tacenva/tacenva-services/app"
@@ -10,6 +11,7 @@ import (
 	operationsEntity "github.com/tacenva/tacenva-services/entity"
 	"github.com/tacenva/tacpass-core/auth"
 	"github.com/tacenva/tacpass-core/contract"
+	"github.com/tacenva/tacpass-core/entity"
 	coreEntity "github.com/tacenva/tacpass-core/entity"
 	"github.com/tacenva/tacpass-core/util/keyring"
 	vaultCore "github.com/tacenva/tacpass-core/vault"
@@ -54,7 +56,7 @@ func (s *Service) getLocalVaultChanges(
 	lastChangeID string,
 	vaultFile *database.DatabaseFile,
 ) (*contract.PendingVaultChange, error) {
-	changeCount, err := s.vaultService.GetChangeCount(
+	pendingCount, err := s.vaultService.GetChangeCount(
 		s.context.SelectedSoT.ID,
 		lastChangeID,
 	)
@@ -62,14 +64,14 @@ func (s *Service) getLocalVaultChanges(
 		return nil, err
 	}
 
-	if changeCount == 0 {
+	if pendingCount.Count == 0 {
 		return nil, nil
 	}
 
 	return s.vaultService.GetChangesAfterOnReplica(
 		s.context.SelectedSoT.ID,
 		lastChangeID,
-		int(changeCount),
+		int(pendingCount.Count),
 		vaultFile,
 	)
 }
@@ -106,10 +108,10 @@ func (s *Service) getClientVaultChanges(
 	return &pendingChange, nil
 }
 
-func (s *Service) List() ([]coreEntity.VaultAccess, bool, error) {
+func (s *Service) List() ([]coreEntity.Vault, bool, error) {
 	var (
-		vaList []coreEntity.VaultAccess
-		err    error
+		vaultList []coreEntity.Vault
+		err       error
 	)
 
 	if !s.context.IsRemote {
@@ -117,46 +119,52 @@ func (s *Service) List() ([]coreEntity.VaultAccess, bool, error) {
 		if err != nil {
 			return nil, false, err
 		}
-		vaList, err = s.vaultService.VaultAccessList(authUser)
+		vaultList, err = s.vaultService.VaultList(authUser)
 		if err != nil {
 			return nil, false, err
 		}
-		return vaList, false, err
+		return vaultList, false, err
 	}
 
 	dbFile, err := s.openVaultFile()
-	err = dbFile.FindAll(&vaList).Order("ID ASC").Err
+	groupID := ""
+	err = dbFile.FindWhere(&vaultList, func(m map[string]any) bool {
+		groupIDs, ok := m["GroupIDs"].([]string)
+		if !ok {
+			return false
+		}
+
+		return slices.Contains(groupIDs, groupID)
+	}).Order("ID ASC").Error
 
 	switch s.context.SelectedSoT.SyncMode {
 	case operationsEntity.SyncModeAuto:
 		err = s.SyncVault()
-		return vaList, err != nil, err
+		return vaultList, err != nil, err
 	case operationsEntity.SyncModeManual:
-		lastChangeID, err := s.vaultService.GetSyncLatestChangeId(s.context.SelectedSoT.ID)
+		lastChangeID, err := s.vaultService.GetSyncLatestChangeID(s.context.SelectedSoT.ID)
 		if err != nil {
-			return vaList, false, err
+			return vaultList, false, err
 		}
 
 		totalChanges, err := s.vaultService.GetChangeCount(s.context.SelectedSoT.ID, lastChangeID)
-		if err != nil {
-			return vaList, false, err
+		if err != nil || totalChanges == nil {
+			return vaultList, false, err
 		}
 
-		var result struct {
-			Count int64 `json:"count"`
-		}
+		var result contract.PendingTotalChanges
 		err = s.appDeps.Client.GetVaultChangesCount(
 			s.context.SelectedSoT.Address,
 			lastChangeID,
 			&result,
 		)
 		if err != nil {
-			return vaList, false, err
+			return vaultList, false, err
 		}
 
-		totalChanges += result.Count
+		totalChanges.Count += result.Count
 
-		return vaList, totalChanges > 0, nil
+		return vaultList, totalChanges.Count > 0, nil
 	}
 	return nil, false, nil
 }
@@ -166,7 +174,7 @@ func (s *Service) SyncVault() error {
 		return nil
 	}
 
-	lastChangeID, err := s.vaultService.GetSyncLatestChangeId(s.context.SelectedSoT.ID)
+	lastChangeID, err := s.vaultService.GetSyncLatestChangeID(s.context.SelectedSoT.ID)
 	if err != nil {
 		return err
 	}
@@ -286,50 +294,51 @@ func (s *Service) SyncVault() error {
 
 func (s *Service) CreateVault(
 	vaultName string,
-) (*coreEntity.VaultAccess, error) {
+	groupIDs []string,
+) error {
 	if s.context == nil {
-		return nil, errors.New("context is nil")
+		return errors.New("context is nil")
 	}
 
 	if s.context.SelectedSoT == nil {
-		return nil, errors.New(
+		return errors.New(
 			"selected source of truth is nil",
 		)
 	}
 
 	var (
 		syncChangeID string
-		vaData       *coreEntity.VaultAccess
 	)
 
 	if !s.context.IsRemote {
 		authUser, err := s.authUser()
 		if err != nil {
-			return nil, err
+			return err
 		}
 
-		vaData, err := s.vaultService.CreateOnSoT(
+		err = s.vaultService.CreateOnSoT(
 			authUser,
 			s.vaultDir(),
 			&coreEntity.Vault{
-				Name: vaultName,
+				Name:     vaultName,
+				GroupIDs: groupIDs,
 			},
 			s.context.SelectedSoT.ID,
 			&syncChangeID,
 		)
 		if err != nil {
-			return nil, err
+			return err
 		}
 
-		return vaData, err
+		return err
 	}
 
 	dbFile, err := s.openVaultFile()
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	_, err = s.vaultService.CreateOnReplica(
+	err = s.vaultService.CreateOnReplica(
 		s.vaultDir(),
 		&coreEntity.Vault{
 			Name: vaultName,
@@ -340,14 +349,14 @@ func (s *Service) CreateVault(
 		&s.context.SelectedSoT.KeyPair,
 	)
 	if err != nil {
-		return vaData, err
+		return err
 	}
 
 	if s.context.SelectedSoT.SyncMode == operationsEntity.SyncModeAuto {
 		err = s.SyncVault()
 	}
 
-	return vaData, err
+	return err
 }
 
 func (s *Service) UpdateVault(
@@ -385,7 +394,7 @@ func (s *Service) UpdateVault(
 			return err
 		}
 
-		_, err = s.vaultService.UpdateOnSoT(
+		err = s.vaultService.UpdateOnSoT(
 			authUser,
 			vault,
 			s.context.SelectedSoT.ID,
@@ -400,7 +409,7 @@ func (s *Service) UpdateVault(
 		return err
 	}
 
-	_, err = s.vaultService.UpdateOnReplica(
+	err = s.vaultService.UpdateOnReplica(
 		vault,
 		s.context.SelectedSoT.ID,
 		&syncChangeID,
@@ -490,12 +499,13 @@ func (s *Service) DeleteVault(
 }
 
 func (s *Service) AppendRecord(
-	vaultAccess *coreEntity.VaultAccess,
+	vault *coreEntity.Vault,
 	record *coreEntity.VaultRecord,
+	wrappedKey string,
 ) (*coreEntity.VaultRecord, error) {
-	if vaultAccess == nil {
+	if vault == nil {
 		return nil, errors.New(
-			"vault access cannot be nil",
+			"vault cannot be nil",
 		)
 	}
 
@@ -505,7 +515,7 @@ func (s *Service) AppendRecord(
 		)
 	}
 
-	if vaultAccess.VaultID == "" {
+	if vault.ID == "" {
 		return nil, errors.New(
 			"vault id cannot be empty",
 		)
@@ -521,7 +531,7 @@ func (s *Service) AppendRecord(
 		)
 	}
 
-	vaultFile, err := s.openRecordFile(vaultAccess)
+	vaultFile, err := s.openRecordFile(vault, wrappedKey)
 	if err != nil {
 		return nil, err
 	}
@@ -538,13 +548,19 @@ func (s *Service) AppendRecord(
 		recordID     string
 	)
 
+	hostname := ""
+	if !s.context.IsRemote {
+		hostname = s.context.SelectedSoT.Hostname
+	}
+
 	err = s.vaultrecordService.Create(
 		vaultDir,
-		vaultAccess.VaultID,
+		vault.ID,
 		&recordID,
 		[]byte(encrypted),
 		s.context.SelectedSoT.ID,
 		&syncChangeID,
+		hostname,
 	)
 	if err != nil {
 		return nil, err
@@ -553,7 +569,7 @@ func (s *Service) AppendRecord(
 	record.ID = recordID
 
 	if s.context.SelectedSoT.SyncMode == operationsEntity.SyncModeAuto {
-		err = s.SyncRecord(vaultAccess)
+		err = s.SyncRecord(vault)
 		if err != nil {
 			return nil, err
 		}
@@ -562,12 +578,13 @@ func (s *Service) AppendRecord(
 }
 
 func (s *Service) UpdateRecord(
-	vaultAccess *coreEntity.VaultAccess,
+	vault *coreEntity.Vault,
 	record *coreEntity.VaultRecord,
+	wrappedKey string,
 ) (*coreEntity.VaultRecord, error) {
-	if vaultAccess == nil {
+	if vault == nil {
 		return nil, errors.New(
-			"vault access cannot be nil",
+			"vault cannot be nil",
 		)
 	}
 
@@ -577,7 +594,7 @@ func (s *Service) UpdateRecord(
 		)
 	}
 
-	if vaultAccess.VaultID == "" {
+	if vault.ID == "" {
 		return nil, errors.New(
 			"vault id cannot be empty",
 		)
@@ -599,7 +616,7 @@ func (s *Service) UpdateRecord(
 		)
 	}
 
-	vaultFile, err := s.openRecordFile(vaultAccess)
+	vaultFile, err := s.openRecordFile(vault, wrappedKey)
 	if err != nil {
 		return nil, err
 	}
@@ -613,20 +630,26 @@ func (s *Service) UpdateRecord(
 
 	var syncChangeID string
 
+	hostname := ""
+	if !s.context.IsRemote {
+		hostname = s.context.SelectedSoT.Hostname
+	}
+
 	err = s.vaultrecordService.Update(
 		vaultDir,
-		vaultAccess.VaultID,
+		vault.ID,
 		record.ID,
 		[]byte(encrypted),
 		s.context.SelectedSoT.ID,
 		&syncChangeID,
+		hostname,
 	)
 	if err != nil {
 		return nil, err
 	}
 
 	if s.context.SelectedSoT.SyncMode == operationsEntity.SyncModeAuto {
-		err = s.SyncRecord(vaultAccess)
+		err = s.SyncRecord(vault)
 		if err != nil {
 			return nil, err
 		}
@@ -636,12 +659,12 @@ func (s *Service) UpdateRecord(
 }
 
 func (s *Service) DeleteRecord(
-	vaultAccess *coreEntity.VaultAccess,
+	vault *coreEntity.Vault,
 	record *coreEntity.VaultRecord,
 ) error {
-	if vaultAccess == nil {
+	if vault == nil {
 		return errors.New(
-			"vault access cannot be nil",
+			"vault cannot be nil",
 		)
 	}
 
@@ -651,7 +674,7 @@ func (s *Service) DeleteRecord(
 		)
 	}
 
-	if vaultAccess.VaultID == "" {
+	if vault.ID == "" {
 		return errors.New(
 			"vault id cannot be empty",
 		)
@@ -676,19 +699,25 @@ func (s *Service) DeleteRecord(
 	vaultDir := s.vaultDir()
 
 	var syncChangeID string
+	hostname := ""
+	if !s.context.IsRemote {
+		hostname = s.context.SelectedSoT.Hostname
+	}
+
 	err := s.vaultrecordService.Delete(
 		vaultDir,
-		vaultAccess.VaultID,
+		vault.ID,
 		record.ID,
 		s.context.SelectedSoT.ID,
 		&syncChangeID,
+		hostname,
 	)
 	if err != nil {
 		return err
 	}
 
 	if s.context.SelectedSoT.SyncMode == operationsEntity.SyncModeAuto {
-		err = s.SyncRecord(vaultAccess)
+		err = s.SyncRecord(vault)
 		if err != nil {
 			return err
 		}
@@ -698,13 +727,13 @@ func (s *Service) DeleteRecord(
 }
 
 func (s *Service) SyncRecord(
-	vaultAccess *coreEntity.VaultAccess,
+	vault *coreEntity.Vault,
 ) error {
 	vaultDir := s.vaultDir()
 
 	lastChangeID, err := s.vaultrecordService.GetSyncLatestChangeId(
 		s.context.SelectedSoT.ID,
-		vaultAccess.VaultID,
+		vault.ID,
 	)
 	if err != nil {
 		return err
@@ -712,7 +741,7 @@ func (s *Service) SyncRecord(
 
 	localChanges, err := s.getLocalRecordChanges(
 		vaultDir,
-		vaultAccess.VaultID,
+		vault.ID,
 		lastChangeID,
 	)
 	if err != nil {
@@ -720,7 +749,7 @@ func (s *Service) SyncRecord(
 	}
 
 	clientChanges, err := s.getClientRecordChanges(
-		vaultAccess.VaultID,
+		vault.ID,
 		lastChangeID,
 	)
 	if err != nil {
@@ -730,7 +759,7 @@ func (s *Service) SyncRecord(
 	if err := s.vaultrecordService.Sync(
 		vaultDir,
 		s.context.SelectedSoT.ID,
-		vaultAccess.VaultID,
+		vault.ID,
 		clientChanges,
 		localChanges,
 	); err != nil {
@@ -744,7 +773,7 @@ func (s *Service) SyncRecord(
 
 	if err := s.appDeps.Client.SyncRecords(
 		s.context.SelectedSoT.Address,
-		vaultAccess.VaultID,
+		vault.ID,
 		appliedClientChanges,
 	); err != nil {
 		return err
@@ -752,7 +781,7 @@ func (s *Service) SyncRecord(
 
 	return s.vaultrecordService.SetSyncStateToBeLastest(
 		s.context.SelectedSoT.ID,
-		vaultAccess.VaultID,
+		vault.ID,
 	)
 }
 
@@ -853,10 +882,11 @@ func (s *Service) openVaultFile() (*database.DatabaseFile, error) {
 }
 
 func (s *Service) openRecordFile(
-	vaultAccess *coreEntity.VaultAccess,
+	vault *coreEntity.Vault,
+	wrappedKey string,
 ) (*database.DatabaseFile, error) {
 	vaultKey, err := s.context.SelectedSoT.KeyPair.Open(
-		vaultAccess.VaultKey,
+		wrappedKey,
 	)
 	if err != nil {
 		return nil, err
@@ -866,22 +896,23 @@ func (s *Service) openRecordFile(
 	db := database.New(vaultDir)
 
 	return db.File(
-		vaultAccess.VaultID,
+		vault.ID,
 		string(vaultKey),
 		database.FileModeOpen,
 	)
 }
 
 func (s *Service) ListRecord(
-	vaultAccess *coreEntity.VaultAccess,
+	vault *coreEntity.Vault,
+	wrappedKey string,
 ) ([]coreEntity.VaultRecord, bool, error) {
-	if vaultAccess == nil {
+	if vault == nil {
 		return nil, false, errors.New(
-			"vault access cannot be nil",
+			"vault cannot be nil",
 		)
 	}
 
-	if vaultAccess.VaultID == "" {
+	if vault.ID == "" {
 		return nil, false, errors.New(
 			"vault id cannot be empty",
 		)
@@ -900,35 +931,35 @@ func (s *Service) ListRecord(
 	}
 
 	vaultDir := s.vaultDir()
-	vaultKey, err := s.context.SelectedSoT.KeyPair.Open(vaultAccess.VaultKey)
+	vaultKey, err := s.context.SelectedSoT.KeyPair.Open(wrappedKey)
 	if err != nil {
 		return nil, false, err
 	}
 
 	records, err := s.vaultrecordService.List(
 		vaultDir,
-		vaultAccess.VaultID,
+		vault.ID,
 		string(vaultKey),
 	)
 	if err != nil {
 		if err == database.ErrFileNotFound && s.context.IsRemote {
 			recordBlob, err := s.appDeps.Client.GetRecordBlob(
 				s.context.SelectedSoT.Address,
-				vaultAccess.VaultID,
+				vault.ID,
 			)
 			if err != nil {
 				return nil, false, err
 			}
 
 			db := database.New(vaultDir)
-			err = db.Write(vaultAccess.VaultID, recordBlob)
+			err = db.Write(vault.ID, recordBlob)
 			if err != nil {
 				return nil, false, err
 			}
 
 			records, err = s.vaultrecordService.List(
 				vaultDir,
-				vaultAccess.VaultID,
+				vault.ID,
 				string(vaultKey),
 			)
 			if err != nil {
@@ -945,13 +976,13 @@ func (s *Service) ListRecord(
 
 	switch s.context.SelectedSoT.SyncMode {
 	case operationsEntity.SyncModeAuto:
-		if err := s.SyncRecord(vaultAccess); err != nil {
+		if err := s.SyncRecord(vault); err != nil {
 			return records, true, err
 		}
 
 		records, err = s.vaultrecordService.List(
 			vaultDir,
-			vaultAccess.VaultID,
+			vault.ID,
 			string(vaultKey),
 		)
 		if err != nil {
@@ -963,7 +994,7 @@ func (s *Service) ListRecord(
 	case operationsEntity.SyncModeManual:
 		lastChangeID, err := s.vaultrecordService.GetSyncLatestChangeId(
 			s.context.SelectedSoT.ID,
-			vaultAccess.VaultID,
+			vault.ID,
 		)
 		if err != nil {
 			return records, false, err
@@ -971,19 +1002,17 @@ func (s *Service) ListRecord(
 
 		totalChanges, err := s.vaultrecordService.GetChangeCount(
 			s.context.SelectedSoT.ID,
-			vaultAccess.VaultID,
+			vault.ID,
 			lastChangeID,
 		)
 		if err != nil {
 			return records, false, err
 		}
 
-		var result struct {
-			Count int64 `json:"count"`
-		}
+		var result contract.PendingTotalChanges
 		err = s.appDeps.Client.GetRecordChangesCount(
 			s.context.SelectedSoT.Address,
-			vaultAccess.VaultID,
+			vault.ID,
 			lastChangeID,
 			&result,
 		)
@@ -997,4 +1026,27 @@ func (s *Service) ListRecord(
 	}
 
 	return records, false, nil
+}
+
+func (s *Service) ListPermissionGroup() ([]entity.PermissionGroup, error) {
+	return s.vaultService.ListPermissionGroup(s.context.SelectedSoT.ID)
+}
+
+func (s *Service) GetWrappedKey(
+	vaultID string,
+) (string, error) {
+	authUser, err := s.authUser()
+	if err != nil {
+		return "", err
+	}
+
+	vaData, err := s.vaultService.FindByVaultAndPermission(
+		vaultID,
+		authUser.PermissionID,
+	)
+	if err != nil {
+		return "", err
+	}
+
+	return vaData.VaultKey, nil
 }

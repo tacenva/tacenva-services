@@ -5,7 +5,6 @@ import (
 	"github.com/tacenva/tacpass-core/auth"
 	"github.com/tacenva/tacpass-core/entity"
 	"github.com/tacenva/tacpass-core/util/keyring"
-	coreVault "github.com/tacenva/tacpass-core/vault"
 
 	"github.com/tacenva/tacenva-services/app"
 )
@@ -14,9 +13,8 @@ type Service struct {
 	appDeps *app.Deps
 	context *app.Context
 
-	coreACService    *coreAC.Service
-	coreVaultService *coreVault.Service
-	authService      *auth.Service
+	coreACService *coreAC.Service
+	authService   *auth.Service
 
 	remoteService *remoteService
 	localService  *localService
@@ -46,18 +44,9 @@ func (s *Service) List() ([]entity.Permission, error) {
 	return s.localService.List()
 }
 
-func (s *Service) Get(
-	id string,
-) (*entity.Permission, error) {
-	if s.context.IsRemote {
-		return s.remoteService.Get(id)
-	}
-	return s.localService.Get(id)
-}
-
 func (s *Service) Create(
 	permission *entity.Permission,
-) ([]entity.VaultAccess, *entity.Permission, *keyring.KeyPair, error) {
+) (*entity.Permission, *keyring.KeyPair, error) {
 	if s.context.IsRemote {
 		return s.remoteService.Create(permission)
 	}
@@ -83,7 +72,7 @@ func (s *Service) SetRevoked(
 		return s.remoteService.SetRevoked(id, revoked)
 	}
 
-	return s.localService.SetRevoked(id, revoked)
+	return s.localService.SetRevoked(id, revoked, s.context.SelectedSoT.ID)
 }
 
 func (s *Service) UserList(
@@ -92,7 +81,7 @@ func (s *Service) UserList(
 	if s.context.IsRemote {
 		return s.remoteService.UserList(permissionID)
 	}
-	return s.localService.UserList(permissionID)
+	return s.localService.UserList(permissionID, s.context.SelectedSoT.ID)
 }
 
 func (s *Service) ApproveUser(
@@ -101,7 +90,7 @@ func (s *Service) ApproveUser(
 	if s.context.IsRemote {
 		return s.remoteService.ApproveUser(userID)
 	}
-	return s.localService.ApproveUser(userID)
+	return s.localService.ApproveUser(userID, s.context.SelectedSoT.ID)
 }
 
 func (s *Service) RevokeUser(
@@ -110,7 +99,7 @@ func (s *Service) RevokeUser(
 	if s.context.IsRemote {
 		return s.remoteService.RevokeUser(userID)
 	}
-	return s.localService.RevokeUser(userID)
+	return s.localService.RevokeUser(userID, s.context.SelectedSoT.ID)
 }
 
 func (s *Service) DeleteAccessControl(
@@ -119,15 +108,11 @@ func (s *Service) DeleteAccessControl(
 	if s.context.IsRemote {
 		return s.remoteService.DeleteAccessControl(id)
 	}
-	return s.localService.DeleteAccessControl(id)
+	return s.localService.DeleteAccessControl(id, s.context.SelectedSoT.ID)
 }
 
-func (s *Service) ListGroups() ([]entity.PermissionGroup, error) {
-	if s.context.IsRemote {
-		return s.remoteService.ListGroups()
-	}
-
-	return s.localService.ListGroups()
+func (s *Service) GroupList() ([]entity.PermissionGroup, error) {
+	return s.coreACService.GroupList(s.context.SelectedSoT.ID)
 }
 
 func (s *Service) UpdateGroup(
@@ -137,7 +122,7 @@ func (s *Service) UpdateGroup(
 		return s.remoteService.UpdateGroup(group)
 	}
 
-	return s.localService.UpdateGroup(group)
+	return s.localService.UpdateGroup(group, s.context.SelectedSoT.ID)
 }
 
 func (s *Service) DeleteGroup(groupID string) error {
@@ -145,5 +130,5 @@ func (s *Service) DeleteGroup(groupID string) error {
 		return s.remoteService.DeleteGroup(groupID)
 	}
 
-	return s.localService.DeleteGroup(groupID)
+	return s.localService.DeleteGroup(groupID, s.context.SelectedSoT.ID)
 }

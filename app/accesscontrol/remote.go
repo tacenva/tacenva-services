@@ -33,30 +33,17 @@ func (s *remoteService) List() ([]entity.Permission, error) {
 	)
 }
 
-func (s *remoteService) Get(
-	id string,
-) (*entity.Permission, error) {
-	if s.context.SelectedSoT == nil {
-		return nil, fmt.Errorf("selected source of truth is nil")
-	}
-
-	return s.appDeps.Client.GetAccessControl(
-		s.context.SelectedSoT.Address,
-		id,
-	)
-}
-
 func (s *remoteService) Create(
 	permission *entity.Permission,
-) ([]entity.VaultAccess, *entity.Permission, *keyring.KeyPair, error) {
+) (*entity.Permission, *keyring.KeyPair, error) {
 	if s.context.SelectedSoT == nil {
-		return nil, nil, nil, fmt.Errorf(
+		return nil, nil, fmt.Errorf(
 			"selected source of truth is nil",
 		)
 	}
 
 	if permission == nil {
-		return nil, nil, nil, fmt.Errorf("permission is required")
+		return nil, nil, fmt.Errorf("permission is required")
 	}
 
 	result, err := s.appDeps.Client.CreateAccessControl(
@@ -64,10 +51,10 @@ func (s *remoteService) Create(
 		permission,
 	)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 
-	return result.VaultAccessList, result.Permission, result.KeyPair, nil
+	return result.Permission, result.KeyPair, nil
 }
 
 func (s *remoteService) Update(
@@ -165,15 +152,15 @@ func (s *remoteService) GrantPrivilege(
 	)
 }
 
-func (s *remoteService) ListGroups() ([]entity.PermissionGroup, error) {
-	if s.context.SelectedSoT == nil {
-		return nil, fmt.Errorf("selected source of truth is nil")
-	}
+// func (s *remoteService) ListGroups() ([]entity.PermissionGroup, error) {
+// 	if s.context.SelectedSoT == nil {
+// 		return nil, fmt.Errorf("selected source of truth is nil")
+// 	}
 
-	return s.appDeps.Client.ListAccessControlGroups(
-		s.context.SelectedSoT.Address,
-	)
-}
+// 	return s.appDeps.Client.ListAccessControlGroups(
+// 		s.context.SelectedSoT.Address,
+// 	)
+// }
 
 func (s *remoteService) UpdateGroup(
 	group *entity.PermissionGroup,
