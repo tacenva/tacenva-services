@@ -72,7 +72,7 @@ func (s *Service) SetRevoked(
 		return s.remoteService.SetRevoked(id, revoked)
 	}
 
-	return s.localService.SetRevoked(id, revoked, s.context.SelectedSoT.ID)
+	return s.localService.SetRevoked(id, revoked, s.context.SelectedSot.ID)
 }
 
 func (s *Service) UserList(
@@ -81,7 +81,7 @@ func (s *Service) UserList(
 	if s.context.IsRemote {
 		return s.remoteService.UserList(permissionID)
 	}
-	return s.localService.UserList(permissionID, s.context.SelectedSoT.ID)
+	return s.localService.UserList(permissionID, s.context.SelectedSot.ID)
 }
 
 func (s *Service) ApproveUser(
@@ -90,7 +90,7 @@ func (s *Service) ApproveUser(
 	if s.context.IsRemote {
 		return s.remoteService.ApproveUser(userID)
 	}
-	return s.localService.ApproveUser(userID, s.context.SelectedSoT.ID)
+	return s.localService.ApproveUser(userID, s.context.SelectedSot.ID)
 }
 
 func (s *Service) RevokeUser(
@@ -99,7 +99,7 @@ func (s *Service) RevokeUser(
 	if s.context.IsRemote {
 		return s.remoteService.RevokeUser(userID)
 	}
-	return s.localService.RevokeUser(userID, s.context.SelectedSoT.ID)
+	return s.localService.RevokeUser(userID, s.context.SelectedSot.ID)
 }
 
 func (s *Service) DeleteAccessControl(
@@ -108,11 +108,11 @@ func (s *Service) DeleteAccessControl(
 	if s.context.IsRemote {
 		return s.remoteService.DeleteAccessControl(id)
 	}
-	return s.localService.DeleteAccessControl(id, s.context.SelectedSoT.ID)
+	return s.localService.DeleteAccessControl(id, s.context.SelectedSot.ID)
 }
 
 func (s *Service) GroupList() ([]entity.PermissionGroup, error) {
-	return s.coreACService.GroupList(s.context.SelectedSoT.ID)
+	return s.coreACService.GroupList(s.context.SelectedSot.ID)
 }
 
 func (s *Service) UpdateGroup(
@@ -122,7 +122,7 @@ func (s *Service) UpdateGroup(
 		return s.remoteService.UpdateGroup(group)
 	}
 
-	return s.localService.UpdateGroup(group, s.context.SelectedSoT.ID)
+	return s.localService.UpdateGroup(group, s.context.SelectedSot.ID)
 }
 
 func (s *Service) DeleteGroup(groupID string) error {
@@ -130,5 +130,5 @@ func (s *Service) DeleteGroup(groupID string) error {
 		return s.remoteService.DeleteGroup(groupID)
 	}
 
-	return s.localService.DeleteGroup(groupID, s.context.SelectedSoT.ID)
+	return s.localService.DeleteGroup(groupID, s.context.SelectedSot.ID)
 }

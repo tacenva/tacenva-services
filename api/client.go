@@ -150,6 +150,22 @@ func (c *Client) Get(
 	)
 }
 
+func (c *Client) Query(
+	address string,
+	path string,
+	body any,
+	result any,
+) error {
+	return c.do(
+		"QUERY",
+		address,
+		path,
+		body,
+		result,
+		true,
+	)
+}
+
 func (c *Client) GetPublic(
 	address string,
 	path string,

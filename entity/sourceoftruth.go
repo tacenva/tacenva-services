@@ -20,6 +20,7 @@ type SourceOfTruth struct {
 
 	AuthToken  string                `json:"auth_token"`
 	UserStatus coreEntity.UserStatus `json:"user_status"`
+	Privilege  coreEntity.Privilege  `json:"privilege"`
 	KeyPair    keyring.KeyPair       `json:"key_pair"`
 	GroupID    string                `json:"group_id"`
 

@@ -59,6 +59,7 @@ func (s *Service) Initialize(
 			Hostname:  hostname,
 			PublicKey: keyPair.PublicKey,
 		},
+		s.appDeps.Config.SotID,
 		coreEntity.UserStatusApproved,
 	)
 	if err != nil {
@@ -104,6 +105,7 @@ func (s *Service) Access(
 
 				AuthToken:  result.AuthToken,
 				UserStatus: result.Status,
+				Privilege:  result.Privilege,
 				KeyPair:    *keyPair,
 				GroupID:    result.GroupAssignment.ID,
 			},
@@ -304,24 +306,31 @@ func (s *Service) Create(
 		}
 	}
 
+	newSot := entity.SourceOfTruth{
+		Hostname: sotHostname,
+		Address:  address,
+		SyncMode: syncMode,
+
+		AuthToken:  response.AuthToken,
+		UserStatus: response.Status,
+		KeyPair:    keypair,
+
+		TLSFingerprint: fingerprint,
+	}
+
+	if response.GroupAssignment != nil {
+		newSot.GroupID = response.GroupAssignment.ID
+	}
+
 	result := s.sotFile.Insert(
-		&entity.SourceOfTruth{
-			Hostname: sotHostname,
-			Address:  address,
-			SyncMode: syncMode,
-
-			AuthToken:  response.AuthToken,
-			UserStatus: response.Status,
-			KeyPair:    keypair,
-			GroupID:    response.GroupAssignment.ID,
-
-			TLSFingerprint: fingerprint,
-		},
+		&newSot,
 	)
 
-	err = s.accessControlService.SyncGroups(result.ID, response.GroupAssignment.Items)
-	if err != nil {
-		return "", err
+	if response.GroupAssignment != nil {
+		err = s.accessControlService.SyncGroups(result.ID, response.GroupAssignment.Items)
+		if err != nil {
+			return "", err
+		}
 	}
 
 	return result.ID, result.Error
@@ -495,18 +504,44 @@ func (s *Service) Delete(
 	return s.sotFile.Delete(
 		stored.ID,
 	).Error
-	// if err != nil {
-	// 	return err
-	// }
+}
+func (s *Service) CheckStatus(
+	sot *entity.SourceOfTruth,
+) error {
+	authData, err := s.appDeps.Client.CheckStatus(sot.Address)
+	if err != nil {
+		return err
+	}
 
-	// var deleted entity.SourceOfTruth
+	changed := false
 
-	// if err := json.Unmarshal(
-	// 	oldData,
-	// 	&deleted,
-	// ); err != nil {
-	// 	return err
-	// }
+	if sot.Privilege != authData.Privilege {
+		sot.Privilege = authData.Privilege
+		changed = true
+	}
 
-	// return &deleted, nil
+	if sot.UserStatus != authData.Status {
+		sot.UserStatus = authData.Status
+		changed = true
+	}
+
+	if authData.GroupAssignment != nil &&
+		sot.GroupID != authData.GroupAssignment.ID {
+		sot.GroupID = authData.GroupAssignment.ID
+
+		if err := s.accessControlService.SyncGroups(
+			sot.ID,
+			authData.GroupAssignment.Items,
+		); err != nil {
+			return err
+		}
+
+		changed = true
+	}
+
+	if !changed {
+		return nil
+	}
+
+	return s.sotFile.Update(sot).Error
 }

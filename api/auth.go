@@ -1,6 +1,8 @@
 package api
 
-import "github.com/tacenva/tacpass-core/contract"
+import (
+	"github.com/tacenva/tacpass-core/contract"
+)
 
 func (c *Client) Enroll(
 	address string,
@@ -18,4 +20,35 @@ func (c *Client) Enroll(
 	}
 
 	return &response, nil
+}
+
+func (c *Client) CheckStatus(
+	address string,
+) (*contract.AuthData, error) {
+	var response contract.AuthData
+
+	if err := c.Get(
+		address,
+		"/auth/status",
+		&response,
+	); err != nil {
+		return nil, err
+	}
+
+	return &response, nil
+}
+
+func (c *Client) GroupAssignment(
+	address string,
+) (*contract.GroupAssignment, error) {
+	var groupAssignment contract.GroupAssignment
+	if err := c.Get(
+		address,
+		"/auth/group",
+		&groupAssignment,
+	); err != nil {
+		return nil, err
+	}
+
+	return &groupAssignment, nil
 }

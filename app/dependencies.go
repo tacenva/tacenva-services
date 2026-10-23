@@ -18,7 +18,7 @@ type Deps struct {
 	ServerService *server.Service
 }
 type Context struct {
-	SelectedSoT *entity.SourceOfTruth
+	SelectedSot *entity.SourceOfTruth
 	NodeDB      *database.DB
 	IsRemote    bool
 }

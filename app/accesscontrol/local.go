@@ -33,12 +33,12 @@ func NewLocalService(
 }
 
 func (s *localService) authUser() (*entity.User, error) {
-	if s.context.SelectedSoT == nil {
+	if s.context.SelectedSot == nil {
 		return nil, fmt.Errorf("selected source of truth is nil")
 	}
 
 	return s.authService.GetUserData(
-		s.context.SelectedSoT.AuthToken,
+		s.context.SelectedSot.AuthToken,
 	)
 }
 
@@ -69,7 +69,7 @@ func (s *localService) Create(
 		permission.Privilege,
 		&permission.Group,
 		permission.AutoApprove,
-		s.context.SelectedSoT.ID,
+		s.context.SelectedSot.ID,
 	)
 }
 

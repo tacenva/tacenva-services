@@ -24,19 +24,19 @@ func NewRemoteService(
 }
 
 func (s *remoteService) List() ([]entity.Permission, error) {
-	if s.context.SelectedSoT == nil {
+	if s.context.SelectedSot == nil {
 		return nil, fmt.Errorf("selected source of truth is nil")
 	}
 
 	return s.appDeps.Client.ListAccessControls(
-		s.context.SelectedSoT.Address,
+		s.context.SelectedSot.Address,
 	)
 }
 
 func (s *remoteService) Create(
 	permission *entity.Permission,
 ) (*entity.Permission, *keyring.KeyPair, error) {
-	if s.context.SelectedSoT == nil {
+	if s.context.SelectedSot == nil {
 		return nil, nil, fmt.Errorf(
 			"selected source of truth is nil",
 		)
@@ -47,7 +47,7 @@ func (s *remoteService) Create(
 	}
 
 	result, err := s.appDeps.Client.CreateAccessControl(
-		s.context.SelectedSoT.Address,
+		s.context.SelectedSot.Address,
 		permission,
 	)
 	if err != nil {
@@ -60,12 +60,12 @@ func (s *remoteService) Create(
 func (s *remoteService) Update(
 	permission *entity.Permission,
 ) error {
-	if s.context.SelectedSoT == nil {
+	if s.context.SelectedSot == nil {
 		return fmt.Errorf("selected source of truth is nil")
 	}
 
 	return s.appDeps.Client.UpdateAccessControl(
-		s.context.SelectedSoT.Address,
+		s.context.SelectedSot.Address,
 		permission,
 	)
 }
@@ -74,12 +74,12 @@ func (s *remoteService) SetRevoked(
 	id string,
 	revoked bool,
 ) error {
-	if s.context.SelectedSoT == nil {
+	if s.context.SelectedSot == nil {
 		return fmt.Errorf("selected source of truth is nil")
 	}
 
 	return s.appDeps.Client.SetRevokedAccessControl(
-		s.context.SelectedSoT.Address,
+		s.context.SelectedSot.Address,
 		id,
 		revoked,
 	)
@@ -88,14 +88,14 @@ func (s *remoteService) SetRevoked(
 func (s *remoteService) UserList(
 	permissionID string,
 ) ([]entity.User, error) {
-	if s.context.SelectedSoT == nil {
+	if s.context.SelectedSot == nil {
 		return nil, fmt.Errorf(
 			"selected source of truth is nil",
 		)
 	}
 
 	return s.appDeps.Client.ListAccessControlUsers(
-		s.context.SelectedSoT.Address,
+		s.context.SelectedSot.Address,
 		permissionID,
 	)
 }
@@ -103,12 +103,12 @@ func (s *remoteService) UserList(
 func (s *remoteService) ApproveUser(
 	userID string,
 ) (*entity.User, error) {
-	if s.context.SelectedSoT == nil {
+	if s.context.SelectedSot == nil {
 		return nil, fmt.Errorf("selected source of truth is nil")
 	}
 
 	return s.appDeps.Client.ApproveAccessControlUser(
-		s.context.SelectedSoT.Address,
+		s.context.SelectedSot.Address,
 		userID,
 	)
 }
@@ -116,12 +116,12 @@ func (s *remoteService) ApproveUser(
 func (s *remoteService) RevokeUser(
 	userID string,
 ) (*entity.User, error) {
-	if s.context.SelectedSoT == nil {
+	if s.context.SelectedSot == nil {
 		return nil, fmt.Errorf("selected source of truth is nil")
 	}
 
 	return s.appDeps.Client.RevokeAccessControlUser(
-		s.context.SelectedSoT.Address,
+		s.context.SelectedSot.Address,
 		userID,
 	)
 }
@@ -129,12 +129,12 @@ func (s *remoteService) RevokeUser(
 func (s *remoteService) DeleteAccessControl(
 	id string,
 ) error {
-	if s.context.SelectedSoT == nil {
+	if s.context.SelectedSot == nil {
 		return fmt.Errorf("selected source of truth is nil")
 	}
 
 	return s.appDeps.Client.DeleteAccessControl(
-		s.context.SelectedSoT.Address,
+		s.context.SelectedSot.Address,
 		id,
 	)
 }
@@ -142,46 +142,46 @@ func (s *remoteService) DeleteAccessControl(
 func (s *remoteService) GrantPrivilege(
 	vaultAccessList []entity.VaultAccess,
 ) error {
-	if s.context.SelectedSoT == nil {
+	if s.context.SelectedSot == nil {
 		return fmt.Errorf("selected source of truth is nil")
 	}
 
 	return s.appDeps.Client.GrantVaultAccess(
-		s.context.SelectedSoT.Address,
+		s.context.SelectedSot.Address,
 		vaultAccessList,
 	)
 }
 
 // func (s *remoteService) ListGroups() ([]entity.PermissionGroup, error) {
-// 	if s.context.SelectedSoT == nil {
+// 	if s.context.SelectedSot == nil {
 // 		return nil, fmt.Errorf("selected source of truth is nil")
 // 	}
 
 // 	return s.appDeps.Client.ListAccessControlGroups(
-// 		s.context.SelectedSoT.Address,
+// 		s.context.SelectedSot.Address,
 // 	)
 // }
 
 func (s *remoteService) UpdateGroup(
 	group *entity.PermissionGroup,
 ) error {
-	if s.context.SelectedSoT == nil {
+	if s.context.SelectedSot == nil {
 		return fmt.Errorf("selected source of truth is nil")
 	}
 
 	return s.appDeps.Client.UpdateAccessControlGroup(
-		s.context.SelectedSoT.Address,
+		s.context.SelectedSot.Address,
 		group,
 	)
 }
 
 func (s *remoteService) DeleteGroup(groupID string) error {
-	if s.context.SelectedSoT == nil {
+	if s.context.SelectedSot == nil {
 		return fmt.Errorf("selected source of truth is nil")
 	}
 
 	return s.appDeps.Client.DeleteAccessControlGroup(
-		s.context.SelectedSoT.Address,
+		s.context.SelectedSot.Address,
 		groupID,
 	)
 }

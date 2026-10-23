@@ -8,76 +8,110 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+
+	"github.com/tacenva/tacpass-core/contract"
+	"github.com/tacenva/tacpass-core/entity"
 )
 
-func (c *Client) ConnectedPublicKeys(
+func (c *Client) PublicKeys(
 	address string,
-	result any,
-) error {
-	return c.Get(
+	groupIDs []string,
+) (map[string][]entity.Permission, error) {
+	var permissions map[string][]entity.Permission
+	if err := c.do(
+		"QUERY",
 		address,
-		"/vault/connected-public-keys",
-		result,
-	)
-}
+		"/vault/public-keys",
+		&contract.PermissionGroupReq{
+			GroupIDs: groupIDs,
+		},
+		&permissions,
+		true,
+	); err != nil {
+		return nil, fmt.Errorf(
+			"[VAULT]: %w",
+			err,
+		)
+	}
 
-func (c *Client) ListVault(
-	address string,
-	result any,
-) error {
-	return c.Get(
-		address,
-		"/vault",
-		result,
-	)
+	return permissions, nil
 }
 
 func (c *Client) GetVaultChanges(
 	address string,
 	startChangeID string,
 	limit int,
-	result any,
-) error {
+) (*contract.PendingVaultChange, error) {
+	var pendingChange contract.PendingVaultChange
 	path := withSyncQuery(
 		"/vault/changes",
 		startChangeID,
 		limit,
 	)
 
-	return c.Get(
+	if err := c.Get(
 		address,
 		path,
-		result,
-	)
+		&pendingChange,
+	); err != nil {
+		return nil, fmt.Errorf(
+			"[VAULT]: %w",
+			err,
+		)
+	}
+
+	return &pendingChange, nil
 }
 
 func (c *Client) GetVaultChangesCount(
 	address string,
 	startChangeID string,
-	result any,
-) error {
+) (*contract.PendingTotalChanges, error) {
+	var pendingTotalChanges contract.PendingTotalChanges
 	path := withStartChangeID(
 		"/vault/changes/count",
 		startChangeID,
 	)
 
-	return c.Get(
+	if err := c.Get(
 		address,
 		path,
-		result,
-	)
+		&pendingTotalChanges,
+	); err != nil {
+		return nil, fmt.Errorf(
+			"[VAULT]: %w",
+			err,
+		)
+	}
+
+	return &pendingTotalChanges, nil
 }
 
 func (c *Client) SyncVault(
 	address string,
+	startChangeID string,
+	limit int,
 	changes any,
-) error {
-	return c.Post(
-		address,
+) (*contract.PendingVaultChange, error) {
+	path := withSyncQuery(
 		"/vault/sync",
-		changes,
-		nil,
+		startChangeID,
+		limit,
 	)
+
+	var successList contract.PendingVaultChange
+
+	err := c.Post(
+		address,
+		path,
+		changes,
+		&successList,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return &successList, nil
 }
 
 func (c *Client) GetRecordBlob(
@@ -122,8 +156,8 @@ func (c *Client) GetRecordChanges(
 	vaultID string,
 	startChangeID string,
 	limit int,
-	result any,
-) error {
+) (*contract.PendingVaultRecordChange, error) {
+	var pendingChange contract.PendingVaultRecordChange
 	path := fmt.Sprintf(
 		"/vault/%s/record/changes",
 		vaultID,
@@ -135,19 +169,26 @@ func (c *Client) GetRecordChanges(
 		limit,
 	)
 
-	return c.Get(
+	if err := c.Get(
 		address,
 		path,
-		result,
-	)
+		&pendingChange,
+	); err != nil {
+		return nil, fmt.Errorf(
+			"[VAULT]: %w",
+			err,
+		)
+	}
+
+	return &pendingChange, nil
 }
 
 func (c *Client) GetRecordChangesCount(
 	address string,
 	vaultID string,
 	startChangeID string,
-	result any,
-) error {
+) (*contract.PendingTotalChanges, error) {
+	var pendingTotalChanges contract.PendingTotalChanges
 	path := fmt.Sprintf(
 		"/vault/%s/record/changes/count",
 		vaultID,
@@ -158,29 +199,51 @@ func (c *Client) GetRecordChangesCount(
 		startChangeID,
 	)
 
-	return c.Get(
+	if err := c.Get(
 		address,
 		path,
-		result,
-	)
+		&pendingTotalChanges,
+	); err != nil {
+		return nil, fmt.Errorf(
+			"[VAULT]: %w",
+			err,
+		)
+	}
+
+	return &pendingTotalChanges, nil
 }
 
 func (c *Client) SyncRecords(
 	address string,
 	vaultID string,
+	startChangeID string,
+	limit int,
 	changes any,
-) error {
+) (*contract.PendingVaultRecordChange, error) {
 	path := fmt.Sprintf(
 		"/vault/%s/record/sync",
 		vaultID,
 	)
 
-	return c.Post(
+	path = withSyncQuery(
+		path,
+		startChangeID,
+		limit,
+	)
+
+	var successList contract.PendingVaultRecordChange
+
+	err := c.Post(
 		address,
 		path,
 		changes,
-		nil,
+		&successList,
 	)
+	if err != nil {
+		return nil, err
+	}
+
+	return &successList, nil
 }
 
 func withStartChangeID(
@@ -221,12 +284,10 @@ func withSyncQuery(
 		startChangeID,
 	)
 
-	if limit > 0 {
-		query.Set(
-			"limit",
-			strconv.Itoa(limit),
-		)
-	}
+	query.Set(
+		"limit",
+		strconv.Itoa(limit),
+	)
 
 	return path + "?" + query.Encode()
 }
