@@ -310,8 +310,7 @@ func (s *Service) SyncVault() error {
 		return err
 	}
 
-	return nil
-	// return s.vaultService.SetSyncStateToBeLastest(s.context.SelectedSot.ID)
+	return s.vaultService.SetSyncStateToBeLastest(s.context.SelectedSot.ID)
 }
 
 func (s *Service) CreateVault(
@@ -779,17 +778,7 @@ func (s *Service) SyncRecord(
 		return err
 	}
 
-	if err := s.vaultrecordService.SyncOnReplica(
-		vaultDir,
-		s.context.SelectedSot.ID,
-		vault.ID,
-		clientChanges,
-		localChanges,
-	); err != nil {
-		return err
-	}
-
-	_, err = s.appDeps.Client.SyncRecords(
+	err = s.appDeps.Client.SyncRecords(
 		s.context.SelectedSot.Address,
 		vault.ID,
 		lastChangeID,

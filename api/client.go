@@ -386,17 +386,21 @@ func (c *Client) do(
 		return parseHTTPError(resp)
 	}
 
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("read response: %w", err)
+	}
+
+	if len(bytes.TrimSpace(data)) == 0 {
+		return nil
+	}
+
 	if result == nil {
 		return nil
 	}
 
-	if err := json.NewDecoder(
-		resp.Body,
-	).Decode(result); err != nil {
-		return fmt.Errorf(
-			"decode response: %w",
-			err,
-		)
+	if err := json.Unmarshal(data, result); err != nil {
+		return fmt.Errorf("decode response: %w", err)
 	}
 
 	return nil

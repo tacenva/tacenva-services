@@ -29,7 +29,7 @@ func (c *Client) PublicKeys(
 		true,
 	); err != nil {
 		return nil, fmt.Errorf(
-			"[VAULT]: %w",
+			"vault: %w",
 			err,
 		)
 	}
@@ -55,7 +55,7 @@ func (c *Client) GetVaultChanges(
 		&pendingChange,
 	); err != nil {
 		return nil, fmt.Errorf(
-			"[VAULT]: %w",
+			"vault: %w",
 			err,
 		)
 	}
@@ -79,7 +79,7 @@ func (c *Client) GetVaultChangesCount(
 		&pendingTotalChanges,
 	); err != nil {
 		return nil, fmt.Errorf(
-			"[VAULT]: %w",
+			"vault: %w",
 			err,
 		)
 	}
@@ -175,7 +175,7 @@ func (c *Client) GetRecordChanges(
 		&pendingChange,
 	); err != nil {
 		return nil, fmt.Errorf(
-			"[VAULT]: %w",
+			"vault: %w",
 			err,
 		)
 	}
@@ -205,7 +205,7 @@ func (c *Client) GetRecordChangesCount(
 		&pendingTotalChanges,
 	); err != nil {
 		return nil, fmt.Errorf(
-			"[VAULT]: %w",
+			"vault: %w",
 			err,
 		)
 	}
@@ -219,7 +219,7 @@ func (c *Client) SyncRecords(
 	startChangeID string,
 	limit int,
 	changes any,
-) (*contract.PendingVaultRecordChange, error) {
+) error {
 	path := fmt.Sprintf(
 		"/vault/%s/record/sync",
 		vaultID,
@@ -231,19 +231,17 @@ func (c *Client) SyncRecords(
 		limit,
 	)
 
-	var successList contract.PendingVaultRecordChange
-
 	err := c.Post(
 		address,
 		path,
 		changes,
-		&successList,
+		nil,
 	)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	return &successList, nil
+	return nil
 }
 
 func withStartChangeID(
