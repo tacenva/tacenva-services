@@ -216,6 +216,7 @@ func (s *Service) SyncVault() error {
 	}
 
 	var appliedOnSot *contract.PendingVaultChange
+	vaultDir := s.vaultDir()
 	if localChanges != nil {
 		groupIDs := collectUniqueGroupIDs(localChanges.VaultChangeDataList)
 		permissionList, err := s.appDeps.Client.PublicKeys(
@@ -276,7 +277,6 @@ func (s *Service) SyncVault() error {
 			return err
 		}
 
-		vaultDir := s.vaultDir()
 		db := database.New(vaultDir)
 		for _, change := range appliedOnSot.SyncChanges {
 			if change.Operation != "create" {
@@ -301,6 +301,7 @@ func (s *Service) SyncVault() error {
 	}
 
 	if err := s.vaultService.SyncOnReplica(
+		vaultDir,
 		s.context.SelectedSot.ID,
 		s.context.SelectedSot.GroupID,
 		localChanges,
@@ -416,11 +417,24 @@ func (s *Service) UpdateVault(
 			return err
 		}
 
+		wrappedKey, err := s.GetWrappedKey(
+			vault.ID,
+		)
+		if err != nil {
+			return err
+		}
+
+		unwrappedKey, err := s.context.SelectedSot.KeyPair.Open(wrappedKey)
+		if err != nil {
+			return err
+		}
+
 		err = s.vaultService.UpdateOnSot(
 			authUser,
 			vault,
 			s.context.SelectedSot.ID,
 			&syncChangeID,
+			unwrappedKey,
 		)
 
 		return err
@@ -946,15 +960,13 @@ func (s *Service) ListRecord(
 
 	vaultDir := s.vaultDir()
 	vaultKey, err := s.context.SelectedSot.KeyPair.Open(wrappedKey)
-	if err != nil {
-		return nil, false, err
-	}
 
 	records, err := s.vaultrecordService.List(
 		vaultDir,
 		vault.ID,
 		string(vaultKey),
 	)
+
 	if err != nil {
 		if err == database.ErrFileNotFound && s.context.IsRemote {
 			recordBlob, err := s.appDeps.Client.GetRecordBlob(
@@ -1058,7 +1070,7 @@ func (s *Service) GetWrappedKey(
 		return "", err
 	}
 
-	vaData, err := s.vaultService.VaultAccessList(
+	vaData, err := s.vaultService.VaultAccess(
 		vaultID,
 		authUser.PermissionID,
 	)
