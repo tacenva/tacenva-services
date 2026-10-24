@@ -22,16 +22,16 @@ import (
 type TLSConfig struct {
 	Fingerprint string
 
-	// Dipanggil ketika server pertama kali dipercaya.
-	// Parameter berisi fingerprint SPKI SHA-256.
+	// Called when the server is trusted for the first time.
+	// The parameter contains the SHA-256 SPKI fingerprint.
 	OnFirstTrust func(fingerprint string) error
 
-	// Alamat TCP yang digunakan untuk koneksi.
+	// TCP address used for the connection.
 	//
-	// Contoh:
+	// Example:
 	//   192.168.100.36:49153
 	//
-	// Berbeda dengan hostname TLS.
+	// This is different from the TLS hostname.
 	DialAddress string
 }
 
@@ -41,12 +41,17 @@ type Client struct {
 	mu         sync.RWMutex
 	tlsConfigs map[string]TLSConfig
 	clients    map[string]*http.Client
+
+	reachable          bool
+	reachableChangedAt time.Time
+	adaptiveInterval   time.Duration
 }
 
 func NewClient() *Client {
 	return &Client{
-		tlsConfigs: make(map[string]TLSConfig),
-		clients:    make(map[string]*http.Client),
+		tlsConfigs:       make(map[string]TLSConfig),
+		clients:          make(map[string]*http.Client),
+		adaptiveInterval: 5 * time.Second,
 	}
 }
 
@@ -58,38 +63,65 @@ func (c *Client) ClearToken() {
 	c.Token = ""
 }
 
-// ConfigureDialAddress mendaftarkan alamat TCP aktual untuk sebuah
-// logical server address.
-//
-// Contoh:
-//
-//	address:     https://archpc.local:49153
-//	dialAddress: 192.168.100.36:49153
-//
-// URL dan TLS tetap menggunakan archpc.local.
-// Hanya koneksi TCP yang diarahkan langsung ke IP.
+func (c *Client) SetReachable(reachable bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.reachable == reachable {
+		return
+	}
+
+	c.reachable = reachable
+	c.reachableChangedAt = time.Now()
+}
+
+func (c *Client) ReachableChangedAt() time.Time {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	return c.reachableChangedAt
+}
+
+func (c *Client) IsReachable() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	return c.reachable
+}
+
+func (c *Client) SetAdaptiveInterval(interval time.Duration) {
+	if interval <= 0 {
+		return
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.adaptiveInterval = interval
+}
+
+func (c *Client) AdaptiveInterval() time.Duration {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	return c.adaptiveInterval
+}
+
+// ConfigureDialAddress registers the actual TCP address for a logical server.
 func (c *Client) ConfigureDialAddress(
 	address string,
 	dialAddress string,
 ) {
-	address = strings.TrimRight(
-		address,
-		"/",
-	)
-
-	dialAddress = strings.TrimSpace(
-		dialAddress,
-	)
+	address = strings.TrimRight(address, "/")
+	dialAddress = strings.TrimSpace(dialAddress)
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	config := c.tlsConfigs[address]
 	config.DialAddress = dialAddress
-
 	c.tlsConfigs[address] = config
 
-	// Transport lama mungkin masih memakai DialAddress lama.
 	delete(c.clients, address)
 }
 
@@ -97,17 +129,11 @@ func (c *Client) ConfigureTLS(
 	address string,
 	config TLSConfig,
 ) {
-	address = strings.TrimRight(
-		address,
-		"/",
-	)
+	address = strings.TrimRight(address, "/")
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	// Kalau sebelumnya sudah ada DialAddress dari discovery
-	// dan ConfigureTLS tidak memberikan DialAddress baru,
-	// pertahankan hasil discovery tersebut.
 	if config.DialAddress == "" {
 		if existing, exists := c.tlsConfigs[address]; exists {
 			config.DialAddress = existing.DialAddress
@@ -115,24 +141,50 @@ func (c *Client) ConfigureTLS(
 	}
 
 	c.tlsConfigs[address] = config
-
-	// Buang HTTP client lama supaya transport dengan
-	// konfigurasi TLS/fingerprint/DialAddress lama
-	// tidak dipakai lagi.
 	delete(c.clients, address)
 }
 
 func (c *Client) ClearTLS(address string) {
-	address = strings.TrimRight(
-		address,
-		"/",
-	)
+	address = strings.TrimRight(address, "/")
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	delete(c.tlsConfigs, address)
 	delete(c.clients, address)
+}
+
+// isConnectionError identifies errors that indicate a connection failure.
+// TLS verification errors and local request errors do not count as connection errors.
+func isConnectionError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	// Unwrap URL errors first. A url.Error can itself implement net.Error,
+	// even when the underlying cause is a TLS verification failure.
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
+		return isConnectionError(urlErr.Err)
+	}
+
+	var opErr *net.OpError
+	if errors.As(err, &opErr) {
+		return true
+	}
+
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) {
+		return true
+	}
+
+	// Covers network timeouts and other network errors.
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return true
+	}
+
+	return false
 }
 
 func (c *Client) Get(
@@ -304,10 +356,7 @@ func (c *Client) do(
 	if body != nil {
 		data, err := json.Marshal(body)
 		if err != nil {
-			return fmt.Errorf(
-				"encode request: %w",
-				err,
-			)
+			return fmt.Errorf("encode request: %w", err)
 		}
 
 		requestBody = bytes.NewReader(data)
@@ -315,17 +364,9 @@ func (c *Client) do(
 		requestBody = bytes.NewReader(nil)
 	}
 
-	address = strings.TrimRight(
-		address,
-		"/",
-	)
+	address = strings.TrimRight(address, "/")
 
-	requestURL := address +
-		"/" +
-		strings.TrimLeft(
-			path,
-			"/",
-		)
+	requestURL := address + "/" + strings.TrimLeft(path, "/")
 
 	req, err := http.NewRequest(
 		method,
@@ -333,56 +374,45 @@ func (c *Client) do(
 		requestBody,
 	)
 	if err != nil {
-		return fmt.Errorf(
-			"create request: %w",
-			err,
-		)
+		return fmt.Errorf("create request: %w", err)
 	}
 
-	req.Header.Set(
-		"Accept",
-		"application/json",
-	)
+	req.Header.Set("Accept", "application/json")
 
 	if body != nil {
-		req.Header.Set(
-			"Content-Type",
-			"application/json",
-		)
+		req.Header.Set("Content-Type", "application/json")
 	}
 
 	if authenticated {
 		if c.Token == "" {
-			return errors.New(
-				"authentication token is required",
-			)
+			return errors.New("authentication token is required")
 		}
 
-		req.Header.Set(
-			"Authorization",
-			"Bearer "+c.Token,
-		)
+		req.Header.Set("Authorization", "Bearer "+c.Token)
 	}
 
-	httpClient, err := c.httpClient(
-		address,
-	)
+	httpClient, err := c.httpClient(address)
 	if err != nil {
+		// Configuration errors do not prove the server is unreachable.
 		return err
 	}
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf(
-			"request failed: %w",
-			err,
-		)
+		if isConnectionError(err) {
+			c.SetReachable(false)
+		}
+
+		return fmt.Errorf("request failed: %w", err)
 	}
 
 	defer resp.Body.Close()
 
-	if resp.StatusCode < 200 ||
-		resp.StatusCode >= 300 {
+	// Any HTTP response means the server was reached,
+	// regardless of its status code.
+	c.SetReachable(true)
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return parseHTTPError(resp)
 	}
 
@@ -410,9 +440,7 @@ func (c *Client) httpClient(
 	address string,
 ) (*http.Client, error) {
 	c.mu.RLock()
-
 	client, exists := c.clients[address]
-
 	c.mu.RUnlock()
 
 	if exists {
@@ -422,7 +450,6 @@ func (c *Client) httpClient(
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	// Double check setelah mendapatkan write lock.
 	if client, exists := c.clients[address]; exists {
 		return client, nil
 	}
@@ -435,10 +462,7 @@ func (c *Client) httpClient(
 		)
 	}
 
-	tlsConfig, err := newTLSConfig(
-		address,
-		config,
-	)
+	tlsConfig, err := newTLSConfig(address, config)
 	if err != nil {
 		return nil, err
 	}
@@ -481,48 +505,27 @@ func newTLSConfig(
 	address string,
 	config TLSConfig,
 ) (*tls.Config, error) {
-	parsedURL, err := url.Parse(
-		address,
-	)
+	parsedURL, err := url.Parse(address)
 	if err != nil {
-		return nil, fmt.Errorf(
-			"parse server address: %w",
-			err,
-		)
+		return nil, fmt.Errorf("parse server address: %w", err)
 	}
 
 	if parsedURL.Hostname() == "" {
-		return nil, fmt.Errorf(
-			"server address hostname is required",
-		)
+		return nil, errors.New("server address hostname is required")
 	}
 
 	hostname := parsedURL.Hostname()
 
 	tlsConfig := &tls.Config{
-		MinVersion: tls.VersionTLS13,
-
-		// Certificate daemon adalah self-signed.
-		// Trust dilakukan secara manual melalui VerifyConnection.
-		InsecureSkipVerify: true,
-
-		// Tetap gunakan hostname logical server.
-		//
-		// Contoh:
-		//   archpc.local
-		//
-		// Jangan gunakan IP hasil discovery di sini.
-		ServerName: hostname,
+		MinVersion:         tls.VersionTLS13,
+		InsecureSkipVerify: true, // Certificate verification is performed manually.
+		ServerName:         hostname,
 	}
 
 	tlsConfig.VerifyConnection = func(
 		state tls.ConnectionState,
 	) error {
-		return verifyTLSConnection(
-			state,
-			hostname,
-			config,
-		)
+		return verifyTLSConnection(state, hostname, config)
 	}
 
 	return tlsConfig, nil
@@ -534,43 +537,28 @@ func verifyTLSConnection(
 	config TLSConfig,
 ) error {
 	if len(state.PeerCertificates) == 0 {
-		return errors.New(
-			"server did not provide a TLS certificate",
-		)
+		return errors.New("server did not provide a TLS certificate")
 	}
 
 	certificate := state.PeerCertificates[0]
-
 	now := time.Now()
 
-	if now.Before(
-		certificate.NotBefore,
-	) {
-		return fmt.Errorf(
-			"server TLS certificate is not valid yet",
-		)
+	if now.Before(certificate.NotBefore) {
+		return errors.New("server TLS certificate is not valid yet")
 	}
 
-	if now.After(
-		certificate.NotAfter,
-	) {
-		return fmt.Errorf(
-			"server TLS certificate has expired",
-		)
+	if now.After(certificate.NotAfter) {
+		return errors.New("server TLS certificate has expired")
 	}
 
-	if err := certificate.VerifyHostname(
-		hostname,
-	); err != nil {
+	if err := certificate.VerifyHostname(hostname); err != nil {
 		return fmt.Errorf(
 			"server TLS certificate hostname verification failed: %w",
 			err,
 		)
 	}
 
-	fingerprint, err := publicKeyFingerprint(
-		certificate,
-	)
+	fingerprint, err := publicKeyFingerprint(certificate)
 	if err != nil {
 		return fmt.Errorf(
 			"calculate server TLS fingerprint: %w",
@@ -578,36 +566,19 @@ func verifyTLSConnection(
 		)
 	}
 
-	// Tidak ada fingerprint yang tersimpan.
-	//
-	// Ini adalah TOFU:
-	// certificate tetap diverifikasi masa berlaku dan hostname-nya,
-	// kemudian public key fingerprint dipercaya dan disimpan.
 	if config.Fingerprint == "" {
 		if config.OnFirstTrust == nil {
-			return errors.New(
-				"server TLS fingerprint is not trusted",
-			)
+			return errors.New("server TLS fingerprint is not trusted")
 		}
 
-		if err := config.OnFirstTrust(
-			fingerprint,
-		); err != nil {
-			return fmt.Errorf(
-				"save server TLS fingerprint: %w",
-				err,
-			)
+		if err := config.OnFirstTrust(fingerprint); err != nil {
+			return fmt.Errorf("save server TLS fingerprint: %w", err)
 		}
 
 		return nil
 	}
 
-	// Fingerprint sudah tersimpan.
-	// Server harus menggunakan public key yang sama.
-	if !strings.EqualFold(
-		config.Fingerprint,
-		fingerprint,
-	) {
+	if !strings.EqualFold(config.Fingerprint, fingerprint) {
 		return fmt.Errorf(
 			"server TLS fingerprint mismatch: expected %s, got %s",
 			config.Fingerprint,
@@ -621,40 +592,66 @@ func verifyTLSConnection(
 func publicKeyFingerprint(
 	certificate *x509.Certificate,
 ) (string, error) {
-	publicKeyDER, err := x509.MarshalPKIXPublicKey(
-		certificate.PublicKey,
-	)
+	publicKeyDER, err := x509.MarshalPKIXPublicKey(certificate.PublicKey)
 	if err != nil {
 		return "", err
 	}
 
-	sum := sha256.Sum256(
-		publicKeyDER,
-	)
+	sum := sha256.Sum256(publicKeyDER)
 
-	return "sha256:" + hex.EncodeToString(
-		sum[:],
-	), nil
+	return "sha256:" + hex.EncodeToString(sum[:]), nil
 }
 
-func parseHTTPError(
-	resp *http.Response,
-) error {
-	body, err := io.ReadAll(
-		resp.Body,
-	)
+func parseHTTPError(resp *http.Response) error {
+	body, err := io.ReadAll(resp.Body)
 	if err == nil {
-		message := strings.TrimSpace(
-			string(body),
-		)
-
+		message := strings.TrimSpace(string(body))
 		if message != "" {
 			return errors.New(message)
 		}
 	}
 
-	return fmt.Errorf(
-		"daemon returned status %d",
-		resp.StatusCode,
+	return fmt.Errorf("daemon returned status %d", resp.StatusCode)
+}
+
+// CheckReachability probes the server's health endpoint.
+// Any HTTP response means the server is reachable.
+// Connection errors set the flag to false; TLS or local errors leave it unchanged.
+func (c *Client) CheckReachability(address string) {
+	address = strings.TrimRight(address, "/")
+
+	httpClient, err := c.httpClient(address)
+	if err != nil {
+		if isConnectionError(err) {
+			c.SetReachable(false)
+		}
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(
+		context.Background(),
+		2*time.Second,
 	)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodGet,
+		address+"/health",
+		nil,
+	)
+	if err != nil {
+		return
+	}
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		if isConnectionError(err) {
+			c.SetReachable(false)
+		}
+		return
+	}
+	defer resp.Body.Close()
+
+	c.SetReachable(true)
 }

@@ -182,62 +182,38 @@ func (c *Client) ListAccessControlUsers(
 	return users, nil
 }
 
-func (c *Client) ApproveAccessControlUser(
+func (c *Client) SetUserStatus(
 	address string,
 	userID string,
-) (*entity.User, error) {
+	status entity.UserStatus,
+) error {
 	userID = strings.TrimSpace(userID)
 
 	if userID == "" {
-		return nil, fmt.Errorf(
+		return fmt.Errorf(
 			"user id is required",
 		)
 	}
 
-	var user entity.User
-
-	if err := c.Post(
-		address,
-		"/access-control/users/"+url.PathEscape(userID)+"/approve",
-		nil,
-		&user,
-	); err != nil {
-		return nil, fmt.Errorf(
-			"approve access control user: %w",
-			err,
-		)
+	request := struct {
+		Status entity.UserStatus `json:"status"`
+	}{
+		Status: status,
 	}
 
-	return &user, nil
-}
-
-func (c *Client) RevokeAccessControlUser(
-	address string,
-	userID string,
-) (*entity.User, error) {
-	userID = strings.TrimSpace(userID)
-
-	if userID == "" {
-		return nil, fmt.Errorf(
-			"user id is required",
-		)
-	}
-
-	var user entity.User
-
-	if err := c.Post(
+	if err := c.Patch(
 		address,
-		"/access-control/users/"+url.PathEscape(userID)+"/revoke",
+		"/access-control/users/"+url.PathEscape(userID)+"/approval",
+		request,
 		nil,
-		&user,
 	); err != nil {
-		return nil, fmt.Errorf(
+		return fmt.Errorf(
 			"revoke access control user: %w",
 			err,
 		)
 	}
 
-	return &user, nil
+	return nil
 }
 
 func (c *Client) GrantVaultAccess(

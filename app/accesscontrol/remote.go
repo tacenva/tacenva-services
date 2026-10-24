@@ -100,29 +100,18 @@ func (s *remoteService) UserList(
 	)
 }
 
-func (s *remoteService) ApproveUser(
+func (s *remoteService) SetUserStatus(
 	userID string,
-) (*entity.User, error) {
+	status entity.UserStatus,
+) error {
 	if s.context.SelectedSot == nil {
-		return nil, fmt.Errorf("selected source of truth is nil")
+		return fmt.Errorf("selected source of truth is nil")
 	}
 
-	return s.appDeps.Client.ApproveAccessControlUser(
+	return s.appDeps.Client.SetUserStatus(
 		s.context.SelectedSot.Address,
 		userID,
-	)
-}
-
-func (s *remoteService) RevokeUser(
-	userID string,
-) (*entity.User, error) {
-	if s.context.SelectedSot == nil {
-		return nil, fmt.Errorf("selected source of truth is nil")
-	}
-
-	return s.appDeps.Client.RevokeAccessControlUser(
-		s.context.SelectedSot.Address,
-		userID,
+		status,
 	)
 }
 

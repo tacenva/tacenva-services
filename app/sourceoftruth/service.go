@@ -441,7 +441,7 @@ func (s *Service) List() (
 
 	if err := s.sotFile.FindAll(
 		&sotData,
-	).Order("ID ASC").Error; err != nil {
+	).Error; err != nil {
 		return nil, err
 	}
 

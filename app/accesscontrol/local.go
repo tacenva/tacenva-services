@@ -118,35 +118,21 @@ func (s *localService) UserList(
 	)
 }
 
-func (s *localService) ApproveUser(
+func (s *localService) SetUserStatus(
 	userID string,
 	sotID string,
-) (*entity.User, error) {
+	status entity.UserStatus,
+) error {
 	authUser, err := s.authUser()
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	return s.coreACService.ApproveUser(
+	return s.coreACService.SetUserStatus(
 		authUser,
-		userID,
 		sotID,
-	)
-}
-
-func (s *localService) RevokeUser(
-	userID string,
-	sotID string,
-) (*entity.User, error) {
-	authUser, err := s.authUser()
-	if err != nil {
-		return nil, err
-	}
-
-	return s.coreACService.RevokeUser(
-		authUser,
 		userID,
-		sotID,
+		status,
 	)
 }
 

@@ -39,8 +39,13 @@ func NewService(
 
 func (s *Service) List() ([]entity.Permission, error) {
 	if s.context.IsRemote {
+		if !s.appDeps.Client.IsReachable() {
+			return nil, nil
+		}
+
 		return s.remoteService.List()
 	}
+
 	return s.localService.List()
 }
 
@@ -84,22 +89,14 @@ func (s *Service) UserList(
 	return s.localService.UserList(permissionID, s.context.SelectedSot.ID)
 }
 
-func (s *Service) ApproveUser(
+func (s *Service) SetUserStatus(
 	userID string,
-) (*entity.User, error) {
+	status entity.UserStatus,
+) error {
 	if s.context.IsRemote {
-		return s.remoteService.ApproveUser(userID)
+		return s.remoteService.SetUserStatus(userID, status)
 	}
-	return s.localService.ApproveUser(userID, s.context.SelectedSot.ID)
-}
-
-func (s *Service) RevokeUser(
-	userID string,
-) (*entity.User, error) {
-	if s.context.IsRemote {
-		return s.remoteService.RevokeUser(userID)
-	}
-	return s.localService.RevokeUser(userID, s.context.SelectedSot.ID)
+	return s.localService.SetUserStatus(userID, s.context.SelectedSot.ID, status)
 }
 
 func (s *Service) DeleteAccessControl(
