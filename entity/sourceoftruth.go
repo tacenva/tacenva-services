@@ -1,8 +1,8 @@
 package entity
 
 import (
-	coreEntity "github.com/tacenva/tacpass-core/entity"
-	"github.com/tacenva/tacpass-core/util/keyring"
+	tacenvaentity "github.com/tacenva/tacenva-core/entity"
+	"github.com/tacenva/tacenva-core/util/keyring"
 )
 
 type SyncMode string
@@ -13,16 +13,25 @@ const (
 )
 
 type SourceOfTruth struct {
-	ID       string   `json:"id"`
-	Hostname string   `json:"hostname"`
-	Address  string   `json:"address"`
-	SyncMode SyncMode `json:"sync_mode"`
+	ID       string    `json:"id"`
+	Hostname string    `json:"hostname"`
+	Address  string    `json:"address"`
+	SyncMode *SyncMode `json:"sync_mode,omitempty"`
 
-	AuthToken  string                `json:"auth_token"`
-	UserStatus coreEntity.UserStatus `json:"user_status"`
-	Privilege  coreEntity.Privilege  `json:"privilege"`
-	KeyPair    keyring.KeyPair       `json:"key_pair"`
-	GroupID    string                `json:"group_id"`
+	Auth        *Auth        `json:"auth,omitempty"`
+	AccessGroup *AccessGroup `json:"access_group,omitempty"`
 
 	TLSFingerprint string `json:"tls_fingerprint"`
+}
+
+type AccessGroup struct {
+	ID      string          `json:"id"`
+	KeyPair keyring.KeyPair `json:"key_pair"`
+}
+
+type Auth struct {
+	Token               string                    `json:"token"`
+	Status              tacenvaentity.UserStatus  `json:"status"`
+	Level               tacenvaentity.AccessLevel `json:"level"`
+	KeyPairOfAccessUnit keyring.KeyPair           `json:"key_pair"`
 }

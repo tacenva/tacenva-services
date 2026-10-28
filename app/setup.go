@@ -4,12 +4,12 @@ import (
 	"fmt"
 
 	"github.com/tacenva/database"
+	"github.com/tacenva/tacenva-core/config"
 	"github.com/tacenva/tacenva-services/api"
 	"github.com/tacenva/tacenva-services/app/server"
 	"github.com/tacenva/tacenva-services/internal/discovery/mdns"
 	"github.com/tacenva/tacenva-services/internal/discovery/vpn"
-	coreapp "github.com/tacenva/tacpass-core/app"
-	"github.com/tacenva/tacpass-core/config"
+	tacpassapp "github.com/tacenva/tacpass-core/app"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
@@ -36,7 +36,7 @@ func Setup(dev bool) (*Deps, error) {
 		)
 	}
 
-	if err := coreapp.Migrate(sqliteDB); err != nil {
+	if err := tacpassapp.Migrate(sqliteDB); err != nil {
 		return nil, err
 	}
 

@@ -9,40 +9,15 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/tacenva/tacpass-core/contract"
-	"github.com/tacenva/tacpass-core/entity"
+	tacpasscontract "github.com/tacenva/tacpass-core/contract"
 )
-
-func (c *Client) PublicKeys(
-	address string,
-	groupIDs []string,
-) (map[string][]entity.Permission, error) {
-	var permissions map[string][]entity.Permission
-	if err := c.do(
-		"QUERY",
-		address,
-		"/vault/public-keys",
-		&contract.PermissionGroupReq{
-			GroupIDs: groupIDs,
-		},
-		&permissions,
-		true,
-	); err != nil {
-		return nil, fmt.Errorf(
-			"vault: %w",
-			err,
-		)
-	}
-
-	return permissions, nil
-}
 
 func (c *Client) GetVaultChanges(
 	address string,
 	startChangeID string,
 	limit int,
-) (*contract.PendingVaultChange, error) {
-	var pendingChange contract.PendingVaultChange
+) (*tacpasscontract.PendingVaultChange, error) {
+	var pendingChange tacpasscontract.PendingVaultChange
 	path := withSyncQuery(
 		"/vault/changes",
 		startChangeID,
@@ -66,8 +41,8 @@ func (c *Client) GetVaultChanges(
 func (c *Client) GetVaultChangesCount(
 	address string,
 	startChangeID string,
-) (*contract.PendingTotalChanges, error) {
-	var pendingTotalChanges contract.PendingTotalChanges
+) (*tacpasscontract.PendingTotalChanges, error) {
+	var pendingTotalChanges tacpasscontract.PendingTotalChanges
 	path := withStartChangeID(
 		"/vault/changes/count",
 		startChangeID,
@@ -92,14 +67,14 @@ func (c *Client) SyncVault(
 	startChangeID string,
 	limit int,
 	changes any,
-) (*contract.PendingVaultChange, error) {
+) (*tacpasscontract.PendingVaultChange, error) {
 	path := withSyncQuery(
 		"/vault/sync",
 		startChangeID,
 		limit,
 	)
 
-	var successList contract.PendingVaultChange
+	var successList tacpasscontract.PendingVaultChange
 
 	err := c.Post(
 		address,
@@ -156,8 +131,8 @@ func (c *Client) GetRecordChanges(
 	vaultID string,
 	startChangeID string,
 	limit int,
-) (*contract.PendingVaultRecordChange, error) {
-	var pendingChange contract.PendingVaultRecordChange
+) (*tacpasscontract.PendingVaultRecordChange, error) {
+	var pendingChange tacpasscontract.PendingVaultRecordChange
 	path := fmt.Sprintf(
 		"/vault/%s/record/changes",
 		vaultID,
@@ -187,8 +162,8 @@ func (c *Client) GetRecordChangesCount(
 	address string,
 	vaultID string,
 	startChangeID string,
-) (*contract.PendingTotalChanges, error) {
-	var pendingTotalChanges contract.PendingTotalChanges
+) (*tacpasscontract.PendingTotalChanges, error) {
+	var pendingTotalChanges tacpasscontract.PendingTotalChanges
 	path := fmt.Sprintf(
 		"/vault/%s/record/changes/count",
 		vaultID,

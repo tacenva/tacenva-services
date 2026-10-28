@@ -1,6 +1,7 @@
 package sourceoftruth
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -11,15 +12,15 @@ import (
 	"strings"
 
 	"github.com/tacenva/database"
+	"github.com/tacenva/tacenva-core/accesscontrol"
+	"github.com/tacenva/tacenva-core/auth"
+	"github.com/tacenva/tacenva-core/config"
+	tacenvacontract "github.com/tacenva/tacenva-core/contract"
+	tacenvaentity "github.com/tacenva/tacenva-core/entity"
+	"github.com/tacenva/tacenva-core/util/keyring"
 	"github.com/tacenva/tacenva-services/api"
 	"github.com/tacenva/tacenva-services/app"
 	"github.com/tacenva/tacenva-services/entity"
-	"github.com/tacenva/tacpass-core/accesscontrol"
-	"github.com/tacenva/tacpass-core/auth"
-	"github.com/tacenva/tacpass-core/config"
-	"github.com/tacenva/tacpass-core/contract"
-	coreEntity "github.com/tacenva/tacpass-core/entity"
-	"github.com/tacenva/tacpass-core/util/keyring"
 )
 
 var (
@@ -45,28 +46,30 @@ func NewService(
 	}
 }
 
-func (s *Service) Initialize(
-	name string,
-	hostname string,
-) (*contract.EnrollResponse, *keyring.KeyPair, error) {
-	_, keyPair, err := s.accessControlService.InitAdminPrivilege(name, s.appDeps.Config.SotID)
+func (s *Service) Initialize() (response *tacenvacontract.EnrollResponse, keyPairOfUnit, keyPairOfGroup *keyring.KeyPair, err error) {
+	hostname, err := os.Hostname()
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
-	response, err := s.authService.Enroll(
-		&contract.EnrollRequest{
+	keyPairOfUnit, keyPairOfGroup, err = s.accessControlService.Internal.InitAccess(s.appDeps.Config.SotID)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	response, err = s.authService.Enroll(
+		&tacenvacontract.EnrollRequest{
 			Hostname:  hostname,
-			PublicKey: keyPair.PublicKey,
+			PublicKey: keyPairOfUnit.PublicKey,
 		},
 		s.appDeps.Config.SotID,
-		coreEntity.UserStatusApproved,
+		tacenvaentity.UserStatusApproved,
 	)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
-	return response, keyPair, nil
+	return response, keyPairOfUnit, keyPairOfGroup, nil
 }
 
 func (s *Service) Access(
@@ -84,15 +87,7 @@ func (s *Service) Access(
 	s.sotFile = sotFile
 
 	if s.sotFile.Count() == 0 {
-		hostname, err := os.Hostname()
-		if err != nil {
-			return err
-		}
-
-		result, keyPair, err := s.Initialize(
-			string(coreEntity.PrivilegeAdmin),
-			hostname,
-		)
+		result, keyPairOfUnit, keyPairOfGroup, err := s.Initialize()
 		if err != nil {
 			return err
 		}
@@ -100,14 +95,20 @@ func (s *Service) Access(
 		if err := s.sotFile.Insert(
 			&entity.SourceOfTruth{
 				ID:       s.appDeps.Config.SotID,
-				Hostname: hostname,
+				Hostname: result.SotHostname,
 				Address:  "localhost",
 
-				AuthToken:  result.AuthToken,
-				UserStatus: result.Status,
-				Privilege:  result.Privilege,
-				KeyPair:    *keyPair,
-				GroupID:    result.GroupAssignment.ID,
+				Auth: &entity.Auth{
+					Token:               result.AuthToken,
+					Status:              result.Status,
+					Level:               result.AccessLevel,
+					KeyPairOfAccessUnit: *keyPairOfUnit,
+				},
+
+				AccessGroup: &entity.AccessGroup{
+					ID:      result.GroupAssignment.ID,
+					KeyPair: *keyPairOfGroup,
+				},
 			},
 		).Error; err != nil {
 			return err
@@ -208,7 +209,7 @@ func normalizeAddress(address string) string {
 func (s *Service) Create(
 	hostnameAlias string,
 	address string,
-	keypair keyring.KeyPair,
+	keyPairOfAccessUnit keyring.KeyPair,
 	syncMode entity.SyncMode,
 ) (string, error) {
 	if s.sotFile == nil {
@@ -241,16 +242,16 @@ func (s *Service) Create(
 
 	response, err := s.appDeps.Client.Enroll(
 		address,
-		contract.EnrollRequest{
+		tacenvacontract.EnrollRequest{
 			Hostname:  hostname,
-			PublicKey: keypair.PublicKey,
+			PublicKey: keyPairOfAccessUnit.PublicKey,
 		},
 	)
 	if err != nil {
 		return "", err
 	}
 
-	sotHostname := response.SoTHostname
+	sotHostname := response.SotHostname
 
 	if hostnameAlias != "" {
 		sotHostname = hostnameAlias
@@ -309,31 +310,42 @@ func (s *Service) Create(
 	newSot := entity.SourceOfTruth{
 		Hostname: sotHostname,
 		Address:  address,
-		SyncMode: syncMode,
+		SyncMode: &syncMode,
 
-		AuthToken:  response.AuthToken,
-		UserStatus: response.Status,
-		KeyPair:    keypair,
+		Auth: &entity.Auth{
+			Token:               response.AuthToken,
+			Status:              response.Status,
+			KeyPairOfAccessUnit: keyPairOfAccessUnit,
+		},
 
 		TLSFingerprint: fingerprint,
 	}
 
 	if response.GroupAssignment != nil {
-		newSot.GroupID = response.GroupAssignment.ID
+		privateKeyOfAccessGroup, err := keyPairOfAccessUnit.Open(response.GroupAssignment.WrappedPrivateKey)
+		if err != nil {
+			return "", err
+		}
+
+		newSot.AccessGroup = &entity.AccessGroup{
+			ID: response.GroupAssignment.ID,
+			KeyPair: *keyring.FromKeys(
+				response.GroupAssignment.PublicKey,
+				string(privateKeyOfAccessGroup),
+			),
+		}
 	}
 
-	result := s.sotFile.Insert(
-		&newSot,
-	)
+	sotResult := s.sotFile.Insert(&newSot)
 
 	if response.GroupAssignment != nil {
-		err = s.accessControlService.SyncGroups(result.ID, response.GroupAssignment.Items)
+		err = s.accessControlService.SyncGroups(sotResult.ID, response.GroupAssignment.Items)
 		if err != nil {
 			return "", err
 		}
 	}
 
-	return result.ID, result.Error
+	return sotResult.ID, sotResult.Error
 }
 
 func (s *Service) Update(
@@ -358,16 +370,16 @@ func (s *Service) Update(
 	).Error
 }
 
-// ResetTLSFingerprint menghapus fingerprint TLS yang tersimpan
-// pada Source of Truth.
+// ResetTLSFingerprint removes the stored TLS fingerprint
+// from the Source of Truth.
 //
-// Setelah fingerprint dikosongkan, request HTTPS berikutnya akan
-// menggunakan mekanisme TOFU melalui OnFirstTrust dan fingerprint
-// baru akan disimpan kembali oleh caller.
+// Once the fingerprint is cleared, the next HTTPS request will
+// use the TOFU mechanism through OnFirstTrust, and the new
+// fingerprint will be stored again by the caller.
 //
-// Method ini sengaja berada di SourceOfTruth Service karena
-// fingerprint merupakan bagian dari persisted SoT state, bukan
-// sekadar state sementara milik HTTP client.
+// This method intentionally resides in the SourceOfTruth Service
+// because the fingerprint is part of the persisted SoT state,
+// rather than merely temporary HTTP client state.
 func (s *Service) ResetTLSFingerprint(
 	sot *entity.SourceOfTruth,
 ) error {
@@ -463,6 +475,13 @@ func (s *Service) List() (
 		},
 	)
 
+	jsonData, err := json.MarshalIndent(sotData, "", "  ")
+	if err != nil {
+		fmt.Println("Gagal marshal JSON:", err)
+	} else {
+		fmt.Println(string(jsonData))
+	}
+
 	return sotData, nil
 }
 
@@ -505,6 +524,7 @@ func (s *Service) Delete(
 		stored.ID,
 	).Error
 }
+
 func (s *Service) CheckStatus(
 	sot *entity.SourceOfTruth,
 ) error {
@@ -515,19 +535,19 @@ func (s *Service) CheckStatus(
 
 	changed := false
 
-	if sot.Privilege != authData.Privilege {
-		sot.Privilege = authData.Privilege
+	if sot.Auth.Level != authData.AccessLevel {
+		sot.Auth.Level = authData.AccessLevel
 		changed = true
 	}
 
-	if sot.UserStatus != authData.Status {
-		sot.UserStatus = authData.Status
+	if sot.Auth.Status != authData.Status {
+		sot.Auth.Status = authData.Status
 		changed = true
 	}
 
 	if authData.GroupAssignment != nil &&
-		sot.GroupID != authData.GroupAssignment.ID {
-		sot.GroupID = authData.GroupAssignment.ID
+		sot.AccessGroup.ID != authData.GroupAssignment.ID {
+		sot.AccessGroup.ID = authData.GroupAssignment.ID
 
 		if err := s.accessControlService.SyncGroups(
 			sot.ID,

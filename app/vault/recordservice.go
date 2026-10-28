@@ -42,17 +42,10 @@ func (s *Service) AppendRecord(
 		)
 	}
 
-	vaultFile, err := s.openRecordFile(vault, wrappedKey)
+	encrypted, err := s.vaultrecordService.Local.SimulateEncryption(record)
 	if err != nil {
 		return nil, err
 	}
-
-	encrypted, err := vaultFile.SimulateEncryption(record)
-	if err != nil {
-		return nil, err
-	}
-
-	vaultDir := s.vaultDir()
 
 	var (
 		syncChangeID string
@@ -60,15 +53,8 @@ func (s *Service) AppendRecord(
 	)
 
 	if !s.context.IsRemote {
-		authUser, err := s.authUser()
-		if err != nil {
-			return nil, err
-		}
-
-		err = s.vaultrecordService.CreateOnSot(
-			authUser,
-			vaultDir,
-			vault.ID,
+		err = s.vaultrecordService.Local.CreateOnSot(
+			s.authorizedUser,
 			&recordID,
 			[]byte(encrypted),
 			s.context.SelectedSot.ID,
@@ -79,9 +65,7 @@ func (s *Service) AppendRecord(
 			return nil, err
 		}
 	} else {
-		err = s.vaultrecordService.CreateOnReplica(
-			vaultDir,
-			vault.ID,
+		err = s.vaultrecordService.Local.CreateOnReplica(
 			&recordID,
 			[]byte(encrypted),
 			s.context.SelectedSot.ID,
@@ -95,7 +79,7 @@ func (s *Service) AppendRecord(
 
 	record.ID = recordID
 
-	if s.context.SelectedSot.SyncMode == operationsEntity.SyncModeAuto {
+	if *s.context.SelectedSot.SyncMode == operationsEntity.SyncModeAuto {
 		err = s.SyncRecord(vault)
 		if err != nil {
 			return nil, err
@@ -143,30 +127,20 @@ func (s *Service) UpdateRecord(
 		)
 	}
 
-	vaultFile, err := s.openRecordFile(vault, wrappedKey)
+	encrypted, err := s.vaultrecordService.Local.SimulateEncryption(record)
 	if err != nil {
 		return nil, err
 	}
-
-	encrypted, err := vaultFile.SimulateEncryption(record)
-	if err != nil {
-		return nil, err
-	}
-
-	vaultDir := s.vaultDir()
 
 	var syncChangeID string
 
 	if !s.context.IsRemote {
-		authUser, err := s.authUser()
 		if err != nil {
 			return nil, err
 		}
 
-		err = s.vaultrecordService.UpdateOnSot(
-			authUser,
-			vaultDir,
-			vault.ID,
+		err = s.vaultrecordService.Local.UpdateOnSot(
+			s.authorizedUser,
 			record.ID,
 			[]byte(encrypted),
 			s.context.SelectedSot.ID,
@@ -177,9 +151,7 @@ func (s *Service) UpdateRecord(
 			return nil, err
 		}
 	} else {
-		err = s.vaultrecordService.UpdateOnReplica(
-			vaultDir,
-			vault.ID,
+		err = s.vaultrecordService.Local.UpdateOnReplica(
 			record.ID,
 			[]byte(encrypted),
 			s.context.SelectedSot.ID,
@@ -191,7 +163,7 @@ func (s *Service) UpdateRecord(
 		}
 	}
 
-	if s.context.SelectedSot.SyncMode == operationsEntity.SyncModeAuto {
+	if *s.context.SelectedSot.SyncMode == operationsEntity.SyncModeAuto {
 		err = s.SyncRecord(vault)
 		if err != nil {
 			return nil, err
@@ -239,19 +211,10 @@ func (s *Service) DeleteRecord(
 		)
 	}
 
-	vaultDir := s.vaultDir()
-
 	var syncChangeID string
 	if !s.context.IsRemote {
-		authUser, err := s.authUser()
-		if err != nil {
-			return err
-		}
-
-		err = s.vaultrecordService.DeleteOnSot(
-			authUser,
-			vaultDir,
-			vault.ID,
+		err := s.vaultrecordService.Local.DeleteOnSot(
+			s.authorizedUser,
 			record.ID,
 			s.context.SelectedSot.ID,
 			&syncChangeID,
@@ -261,9 +224,7 @@ func (s *Service) DeleteRecord(
 			return err
 		}
 	} else {
-		err := s.vaultrecordService.DeleteOnReplica(
-			vaultDir,
-			vault.ID,
+		err := s.vaultrecordService.Local.DeleteOnReplica(
 			record.ID,
 			s.context.SelectedSot.ID,
 			&syncChangeID,
@@ -274,7 +235,7 @@ func (s *Service) DeleteRecord(
 		}
 	}
 
-	if s.context.SelectedSot.SyncMode == operationsEntity.SyncModeAuto {
+	if *s.context.SelectedSot.SyncMode == operationsEntity.SyncModeAuto {
 		err := s.SyncRecord(vault)
 		if err != nil {
 			return err
@@ -287,8 +248,6 @@ func (s *Service) DeleteRecord(
 func (s *Service) SyncRecord(
 	vault *coreEntity.Vault,
 ) error {
-	vaultDir := s.vaultDir()
-
 	lastChangeID, err := s.vaultrecordService.GetSyncLatestChangeId(
 		s.context.SelectedSot.ID,
 		vault.ID,
@@ -298,7 +257,7 @@ func (s *Service) SyncRecord(
 	}
 
 	localChanges, err := s.getLocalRecordChanges(
-		vaultDir,
+		*s.vaultDir,
 		vault.ID,
 		lastChangeID,
 	)
@@ -326,7 +285,7 @@ func (s *Service) SyncRecord(
 	}
 
 	if err := s.vaultrecordService.SyncOnReplica(
-		vaultDir,
+		*s.vaultDir,
 		s.context.SelectedSot.ID,
 		vault.ID,
 		clientChanges,
@@ -426,36 +385,25 @@ func (s *Service) ListRecord(
 		)
 	}
 
-	vaultDir := s.vaultDir()
-	vaultKey, err := s.context.SelectedSot.KeyPair.Open(wrappedKey)
-
-	records, err := s.vaultrecordService.List(
-		vaultDir,
-		vault.ID,
-		string(vaultKey),
-	)
+	records, err := s.vaultrecordService.Local.List()
 
 	if err != nil {
 		if err == database.ErrFileNotFound && s.context.IsRemote {
-			recordBlob, err := s.appDeps.Client.GetRecordBlob(
-				s.context.SelectedSot.Address,
-				vault.ID,
-			)
-			if err != nil {
-				return nil, false, err
-			}
+			// recordBlob, err := s.appDeps.Client.GetRecordBlob(
+			// 	s.context.SelectedSot.Address,
+			// 	vault.ID,
+			// )
+			// if err != nil {
+			// 	return nil, false, err
+			// }
 
-			db := database.New(vaultDir)
-			err = db.Write(vault.ID, recordBlob)
-			if err != nil {
-				return nil, false, err
-			}
+			// db := database.New("vaultDir")
+			// err = db.Write(vault.ID, recordBlob)
+			// if err != nil {
+			// 	return nil, false, err
+			// }
 
-			records, err = s.vaultrecordService.List(
-				vaultDir,
-				vault.ID,
-				string(vaultKey),
-			)
+			records, err = s.vaultrecordService.Local.List()
 			if err != nil {
 				return nil, false, err
 			}
@@ -472,17 +420,13 @@ func (s *Service) ListRecord(
 		return records, false, nil
 	}
 
-	switch s.context.SelectedSot.SyncMode {
+	switch *s.context.SelectedSot.SyncMode {
 	case operationsEntity.SyncModeAuto:
 		if err := s.SyncRecord(vault); err != nil {
 			return records, true, err
 		}
 
-		records, err = s.vaultrecordService.List(
-			vaultDir,
-			vault.ID,
-			string(vaultKey),
-		)
+		records, err = s.vaultrecordService.Local.List()
 		if err != nil {
 			return nil, false, err
 		}

@@ -7,12 +7,12 @@ import (
 	"github.com/tacenva/tacenva-services/app"
 	"github.com/tacenva/tacenva-services/app/sourceoftruth"
 
+	"github.com/tacenva/tacenva-core/auth"
+	tacenvaentity "github.com/tacenva/tacenva-core/entity"
+	"github.com/tacenva/tacenva-core/util/keyring"
 	operationsEntity "github.com/tacenva/tacenva-services/entity"
-	"github.com/tacenva/tacpass-core/auth"
 	"github.com/tacenva/tacpass-core/contract"
-	"github.com/tacenva/tacpass-core/entity"
-	coreEntity "github.com/tacenva/tacpass-core/entity"
-	"github.com/tacenva/tacpass-core/util/keyring"
+	tacpassentity "github.com/tacenva/tacpass-core/entity"
 	vaultCore "github.com/tacenva/tacpass-core/vault"
 	vaultrecordCore "github.com/tacenva/tacpass-core/vaultrecord"
 )
@@ -22,38 +22,48 @@ var (
 )
 
 type Service struct {
-	appDeps   *app.Deps
-	context   *app.Context
-	masterKey string
+	appDeps *app.Deps
+	context *app.Context
 
 	vaultService       *vaultCore.Service
 	vaultrecordService *vaultrecordCore.Service
-	authService        *auth.Service
+
+	authorizedUser *tacenvaentity.User
+	vaultDir       *string
 }
 
 func NewService(
 	appDeps *app.Deps,
 	context *app.Context,
-	masterKey string,
 	vaultService *vaultCore.Service,
 	vaultrecordService *vaultrecordCore.Service,
 	authService *auth.Service,
 	sotService *sourceoftruth.Service,
 ) *Service {
-	return &Service{
-		appDeps:   appDeps,
-		context:   context,
-		masterKey: masterKey,
+	var authorizedUser *tacenvaentity.User
+	// if !context.IsRemote {
+	// 	user, err := authService.GetUserData(
+	// 		context.SelectedSot.Auth.Token,
+	// 	)
+	// 	if err != nil {
+	// 		return nil
+	// 	}
 
-		authService:        authService,
+	// 	authorizedUser = user
+	// }
+
+	return &Service{
+		appDeps:            appDeps,
+		context:            context,
 		vaultService:       vaultService,
 		vaultrecordService: vaultrecordService,
+
+		authorizedUser: authorizedUser,
 	}
 }
 
 func (s *Service) getLocalVaultChanges(
 	lastChangeID string,
-	vaultFile *database.DatabaseFile,
 ) (*contract.PendingVaultChange, error) {
 	pendingCount, err := s.vaultService.GetChangeCount(
 		s.context.SelectedSot.ID,
@@ -67,11 +77,10 @@ func (s *Service) getLocalVaultChanges(
 		return nil, nil
 	}
 
-	return s.vaultService.GetChangesAfterOnReplica(
+	return s.vaultService.Replica.GetChangesAfter(
 		s.context.SelectedSot.ID,
 		lastChangeID,
 		int(pendingCount.Count),
-		vaultFile,
 	)
 }
 
@@ -102,45 +111,21 @@ func (s *Service) getClientVaultChanges(
 	return pendingChanges, changeCount, nil
 }
 
-func (s *Service) List() ([]coreEntity.Vault, bool, error) {
+func (s *Service) List() ([]tacpassentity.Vault, bool, error) {
 	var (
-		vaultList []coreEntity.Vault
+		vaultList []tacpassentity.Vault
 		err       error
 	)
 
 	if !s.context.IsRemote {
-		authUser, err := s.authUser()
-		if err != nil {
-			return nil, false, err
-		}
-		vaultList, err = s.vaultService.VaultList(authUser)
+		vaultList, err = s.vaultService.Sot.List(s.authorizedUser)
 		if err != nil {
 			return nil, false, err
 		}
 		return vaultList, false, err
 	}
 
-	dbFile, err := s.openVaultFile()
-	if err != nil {
-		return nil, false, err
-	}
-
-	groupID := s.context.SelectedSot.GroupID
-	err = dbFile.FindWhere(&vaultList, func(m map[string]any) bool {
-		groupIDs, ok := m["group_ids"].([]any)
-		if !ok {
-			return false
-		}
-
-		for _, value := range groupIDs {
-			id, ok := value.(string)
-			if ok && id == groupID {
-				return true
-			}
-		}
-
-		return false
-	}).Order("ID ASC").Error
+	vaultList, err = s.vaultService.Replica.List(s.context.SelectedSot.AccessGroup.ID)
 	if err != nil {
 		return nil, false, err
 	}
@@ -149,7 +134,7 @@ func (s *Service) List() ([]coreEntity.Vault, bool, error) {
 		return vaultList, false, nil
 	}
 
-	switch s.context.SelectedSot.SyncMode {
+	switch *s.context.SelectedSot.SyncMode {
 	case operationsEntity.SyncModeAuto:
 		err = s.SyncVault()
 		return vaultList, err != nil, err
@@ -208,12 +193,7 @@ func (s *Service) SyncVault() error {
 		return err
 	}
 
-	vaultFile, err := s.openVaultFile()
-	if err != nil {
-		return err
-	}
-
-	localChanges, err := s.getLocalVaultChanges(lastChangeID, vaultFile)
+	localChanges, err := s.getLocalVaultChanges(lastChangeID)
 	if err != nil {
 		return err
 	}
@@ -224,10 +204,9 @@ func (s *Service) SyncVault() error {
 	}
 
 	var appliedOnSot *contract.PendingVaultChange
-	vaultDir := s.vaultDir()
 	if localChanges != nil {
 		groupIDs := collectUniqueGroupIDs(localChanges.VaultChangeDataList)
-		permissionList, err := s.appDeps.Client.PublicKeys(
+		publicKeyOfGroups, err := s.appDeps.Client.PublicKeyOfGroups(
 			s.context.SelectedSot.Address,
 			groupIDs,
 		)
@@ -235,9 +214,9 @@ func (s *Service) SyncVault() error {
 			return err
 		}
 
-		nodeKeyPair := keyring.FromKeys(
-			s.context.SelectedSot.KeyPair.PublicKey,
-			s.context.SelectedSot.KeyPair.PrivateKey,
+		writerGroupKeyPair := keyring.FromKeys(
+			s.context.SelectedSot.AccessGroup.KeyPair.PublicKey,
+			s.context.SelectedSot.AccessGroup.KeyPair.PrivateKey,
 		)
 
 		for vaultID := range localChanges.VaultChangeDataList {
@@ -247,29 +226,25 @@ func (s *Service) SyncVault() error {
 			}
 
 			vault := vaultChangeData.Vault
-
-			vaultKey, err := nodeKeyPair.Open(vault.WrappedKey)
+			unwrappedVaultKey, err := writerGroupKeyPair.Open(vault.WrappedKey)
 			if err != nil {
 				return err
 			}
 
 			for _, groupID := range vault.GroupIDs {
-				permissionByGroup := permissionList[groupID]
-				for _, permissionData := range permissionByGroup {
-					vaultKeyPair := keyring.FromPublicKey(permissionData.PublicKey)
+				publicKey := publicKeyOfGroups[groupID]
+				keyPairOfAccessGroup := keyring.FromPublicKey(publicKey)
 
-					wrappedVaultKey, err := vaultKeyPair.Seal([]byte(vaultKey))
-					if err != nil {
-						return err
-					}
-
-					access := coreEntity.VaultAccess{
-						VaultID:      vaultID,
-						PermissionID: permissionData.ID,
-						VaultKey:     wrappedVaultKey,
-					}
-					vaultChangeData.VaultAccessList = append(vaultChangeData.VaultAccessList, access)
+				wrappedVaultKey, err := keyPairOfAccessGroup.Seal(unwrappedVaultKey)
+				if err != nil {
+					return err
 				}
+				access := tacpassentity.VaultAccess{
+					VaultID:         vaultID,
+					AccessGroupID:   groupID,
+					WrappedVaultKey: wrappedVaultKey,
+				}
+				vaultChangeData.VaultAccessList = append(vaultChangeData.VaultAccessList, access)
 			}
 
 			localChanges.VaultChangeDataList[vaultID] = vaultChangeData
@@ -285,7 +260,7 @@ func (s *Service) SyncVault() error {
 			return err
 		}
 
-		db := database.New(vaultDir)
+		db := database.New(*s.vaultDir)
 		for _, change := range appliedOnSot.SyncChanges {
 			if change.Operation != "create" {
 				continue
@@ -308,13 +283,11 @@ func (s *Service) SyncVault() error {
 		}
 	}
 
-	if err := s.vaultService.SyncOnReplica(
-		vaultDir,
+	if err := s.vaultService.Replica.Sync(
 		s.context.SelectedSot.ID,
-		s.context.SelectedSot.GroupID,
+		s.context.SelectedSot.AccessGroup.ID,
 		localChanges,
 		clientChanges,
-		vaultFile,
 	); err != nil {
 		return err
 	}
@@ -341,19 +314,12 @@ func (s *Service) CreateVault(
 	)
 
 	if !s.context.IsRemote {
-		authUser, err := s.authUser()
-		if err != nil {
-			return err
-		}
-
-		err = s.vaultService.CreateOnSot(
-			authUser,
-			s.vaultDir(),
-			&coreEntity.Vault{
+		err := s.vaultService.Sot.Create(
+			s.authorizedUser,
+			&tacpassentity.Vault{
 				Name:     vaultName,
 				GroupIDs: groupIDs,
 			},
-			s.context.SelectedSot.ID,
 			&syncChangeID,
 		)
 		if err != nil {
@@ -363,27 +329,20 @@ func (s *Service) CreateVault(
 		return err
 	}
 
-	dbFile, err := s.openVaultFile()
-	if err != nil {
-		return err
-	}
-
-	err = s.vaultService.CreateOnReplica(
-		s.vaultDir(),
-		&coreEntity.Vault{
+	err := s.vaultService.Replica.Create(
+		&tacpassentity.Vault{
 			Name:     vaultName,
 			GroupIDs: groupIDs,
 		},
 		s.context.SelectedSot.ID,
 		&syncChangeID,
-		dbFile,
-		&s.context.SelectedSot.KeyPair,
+		&s.context.SelectedSot.AccessGroup.KeyPair,
 	)
 	if err != nil {
 		return err
 	}
 
-	if s.context.SelectedSot.SyncMode == operationsEntity.SyncModeAuto {
+	if *s.context.SelectedSot.SyncMode == operationsEntity.SyncModeAuto {
 		err = s.SyncVault()
 	}
 
@@ -391,7 +350,7 @@ func (s *Service) CreateVault(
 }
 
 func (s *Service) UpdateVault(
-	vault *coreEntity.Vault,
+	vault *tacpassentity.Vault,
 ) error {
 	if vault == nil {
 		return errors.New("vault cannot be nil")
@@ -420,50 +379,35 @@ func (s *Service) UpdateVault(
 	)
 
 	if !s.context.IsRemote {
-		authUser, err := s.authUser()
-		if err != nil {
-			return err
-		}
-
-		wrappedKey, err := s.GetWrappedKey(
+		wrappedVaultKey, err := s.GetWrappedVaultKey(
 			vault.ID,
 		)
 		if err != nil {
 			return err
 		}
 
-		unwrappedKey, err := s.context.SelectedSot.KeyPair.Open(wrappedKey)
-		if err != nil {
-			return err
-		}
+		unwrappedVaultKey, err := s.context.SelectedSot.AccessGroup.KeyPair.Open(wrappedVaultKey)
 
-		err = s.vaultService.UpdateOnSot(
-			authUser,
+		err = s.vaultService.Sot.Update(
+			s.authorizedUser,
 			vault,
-			s.context.SelectedSot.ID,
+			unwrappedVaultKey,
 			&syncChangeID,
-			unwrappedKey,
 		)
 
 		return err
 	}
 
-	dbFile, err := s.openVaultFile()
-	if err != nil {
-		return err
-	}
-
-	err = s.vaultService.UpdateOnReplica(
+	err := s.vaultService.Replica.Update(
 		vault,
 		s.context.SelectedSot.ID,
 		&syncChangeID,
-		dbFile,
 	)
 	if err != nil {
 		return err
 	}
 
-	if s.context.SelectedSot.SyncMode == operationsEntity.SyncModeAuto {
+	if *s.context.SelectedSot.SyncMode == operationsEntity.SyncModeAuto {
 		if err = s.SyncVault(); err != nil {
 			return err
 		}
@@ -473,7 +417,7 @@ func (s *Service) UpdateVault(
 }
 
 func (s *Service) DeleteVault(
-	vault *coreEntity.Vault,
+	vault *tacpassentity.Vault,
 ) error {
 	if vault == nil {
 		return errors.New("vault cannot be nil")
@@ -497,17 +441,9 @@ func (s *Service) DeleteVault(
 		syncChangeID string
 	)
 
-	vaultDir := s.vaultDir()
-
 	if !s.context.IsRemote {
-		authUser, err := s.authUser()
-		if err != nil {
-			return err
-		}
-
-		err = s.vaultService.DeleteOnSot(
-			authUser,
-			vaultDir,
+		err := s.vaultService.Sot.Delete(
+			s.authorizedUser,
 			vault.ID,
 			s.context.SelectedSot.ID,
 			&syncChangeID,
@@ -516,23 +452,16 @@ func (s *Service) DeleteVault(
 		return err
 	}
 
-	dbFile, err := s.openVaultFile()
-	if err != nil {
-		return err
-	}
-
-	err = s.vaultService.DeleteOnReplica(
-		vaultDir,
+	err := s.vaultService.Replica.Delete(
 		vault.ID,
 		s.context.SelectedSot.ID,
 		&syncChangeID,
-		dbFile,
 	)
 	if err != nil {
 		return err
 	}
 
-	if s.context.SelectedSot.SyncMode == operationsEntity.SyncModeAuto {
+	if *s.context.SelectedSot.SyncMode == operationsEntity.SyncModeAuto {
 		err = s.SyncVault()
 		if err != nil {
 			return err
@@ -542,85 +471,25 @@ func (s *Service) DeleteVault(
 	return nil
 }
 
-func (s *Service) authUser() (*coreEntity.User, error) {
-	if s.context.SelectedSot == nil {
-		return nil, errors.New(
-			"selected source of truth is nil",
+func (s *Service) GetWrappedVaultKey(
+	vaultID string,
+) (string, error) {
+	if !s.context.IsRemote {
+		return s.vaultService.Sot.GetWrappedKey(
+			s.authorizedUser,
+			vaultID,
 		)
 	}
 
-	return s.authService.GetUserData(
-		s.context.SelectedSot.AuthToken,
-	)
+	return s.vaultService.Replica.GetWrappedKey(vaultID)
 }
 
-func (s *Service) vaultDir() string {
-	vaultDir := s.appDeps.Config.Path(
-		"node",
-		s.context.SelectedSot.ID,
-		"vault",
-	)
-
-	return vaultDir
-}
-
-func (s *Service) openVaultFile() (*database.DatabaseFile, error) {
-	vaultDir := s.vaultDir()
-	db := database.New(vaultDir)
-
-	return db.File(
-		"vault",
-		s.masterKey,
-		database.FileModeOpenOrCreate,
-	)
-}
-
-func (s *Service) openRecordFile(
-	vault *coreEntity.Vault,
-	wrappedKey string,
-) (*database.DatabaseFile, error) {
-	vaultKey, err := s.context.SelectedSot.KeyPair.Open(
-		wrappedKey,
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	vaultDir := s.vaultDir()
-	db := database.New(vaultDir)
-
-	return db.File(
-		vault.ID,
-		string(vaultKey),
-		database.FileModeOpen,
-	)
-}
-
-func (s *Service) ListPermissionGroup(refresh bool) ([]entity.PermissionGroup, error) {
+func (s *Service) AllAccessGroup(refresh bool) ([]tacenvaentity.AccessGroup, error) {
 	if refresh && s.context.IsRemote {
-		_, err := s.appDeps.Client.GroupAssignment(s.context.SelectedSot.Address)
-		if err != nil {
-			return nil, err
-		}
-	}
-	return s.vaultService.ListPermissionGroup(s.context.SelectedSot.ID)
-}
-
-func (s *Service) GetWrappedKey(
-	vaultID string,
-) (string, error) {
-	authUser, err := s.authUser()
-	if err != nil {
-		return "", err
+		//
 	}
 
-	vaData, err := s.vaultService.VaultAccess(
-		vaultID,
-		authUser.PermissionID,
+	return s.vaultService.AllAccessGroup(
+		s.context.SelectedSot.ID,
 	)
-	if err != nil {
-		return "", err
-	}
-
-	return vaData.VaultKey, nil
 }
