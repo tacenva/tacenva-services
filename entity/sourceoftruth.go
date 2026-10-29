@@ -13,10 +13,10 @@ const (
 )
 
 type SourceOfTruth struct {
-	ID       string    `json:"id"`
-	Hostname string    `json:"hostname"`
-	Address  string    `json:"address"`
-	SyncMode *SyncMode `json:"sync_mode,omitempty"`
+	ID       string   `json:"id"`
+	Hostname string   `json:"hostname"`
+	Address  string   `json:"address"`
+	SyncMode SyncMode `json:"sync_mode,omitempty"`
 
 	Auth        *Auth        `json:"auth,omitempty"`
 	AccessGroup *AccessGroup `json:"access_group,omitempty"`

@@ -76,19 +76,36 @@ func (s *Service) CreateGroup(
 		}
 	}
 
+	req := tacenvacontract.AccessGroupSetupRequest{
+		AccessGroup:         newAccessGroup,
+		AdminUnit:           adminUnit,
+		ParentGroupID:       s.selectedGroup.ID,
+		WrappedGroupKey:     wrappedGroupKey,
+		WrappedHierarchyKey: wrappedHierarchyKey,
+	}
+
+	if s.context.IsRemote {
+		return s.appDeps.Client.CreateAccessGroup(
+			s.context.SelectedSot.Address,
+			&req,
+		)
+	}
 	return s.accesscontrolService.CreateGroup(
 		s.context.AuthorizedUser,
-		newAccessGroup,
-		adminUnit,
-		s.selectedGroup.ID,
-		wrappedGroupKey,
-		wrappedHierarchyKey,
+		&req,
 	)
 }
 
 func (s *Service) UpdateGroup(
 	toUpdateAccessGroup *tacenvaentity.AccessGroup,
 ) error {
+	if s.context.IsRemote {
+		return s.appDeps.Client.UpdateAccessGroup(
+			s.context.SelectedSot.Address,
+			toUpdateAccessGroup.ID,
+			toUpdateAccessGroup,
+		)
+	}
 	return s.accesscontrolService.UpdateGroup(
 		s.context.AuthorizedUser,
 		toUpdateAccessGroup,
@@ -98,6 +115,12 @@ func (s *Service) UpdateGroup(
 func (s *Service) DeleteGroup(
 	groupID string,
 ) error {
+	if s.context.IsRemote {
+		return s.appDeps.Client.DeleteAccessGroup(
+			s.context.SelectedSot.Address,
+			groupID,
+		)
+	}
 	return s.accesscontrolService.DeleteGroup(
 		s.context.AuthorizedUser,
 		groupID,
@@ -110,6 +133,12 @@ func (s *Service) GroupWithChildren(
 	selectedGroupID := ""
 	if selectedGroup != nil {
 		selectedGroupID = selectedGroup.ID
+	}
+	if s.context.IsRemote {
+		return s.appDeps.Client.AccessGroupWithChildren(
+			s.context.SelectedSot.Address,
+			selectedGroupID,
+		)
 	}
 	return s.accesscontrolService.GroupWithChildren(s.context.AuthorizedUser, selectedGroupID)
 }
@@ -125,23 +154,39 @@ func (s *Service) CreateUnit(
 	accessUnit.PublicKey = keyPairForAccessUnit.PublicKey
 	accessUnit.GroupID = s.selectedGroup.ID
 	accessUnit.SotID = s.context.SelectedSot.ID
-	// sementara
-	unwrappedGroupKey := s.context.SelectedSot.AccessGroup.KeyPair.PrivateKey
+	unwrappedGroupKey := s.keyPairOfSelectedGroup.PrivateKey
 	wrappedGroupKey, err := keyPairForAccessUnit.Seal([]byte(unwrappedGroupKey))
 	if err != nil {
 		return err
 	}
 
+	req := tacenvacontract.AccessUnitSetupReq{
+		AccessUnit:      accessUnit,
+		WrappedGroupKey: wrappedGroupKey,
+	}
+
+	if s.context.IsRemote {
+		return s.appDeps.Client.CreateAccessUnit(
+			s.context.SelectedSot.Address,
+			&req,
+		)
+	}
 	return s.accesscontrolService.CreateUnit(
 		s.context.SelectedSot.ID,
-		accessUnit,
-		wrappedGroupKey,
+		&req,
 	)
 }
 
 func (s *Service) UpdateUnit(
 	accessUnit *tacenvaentity.AccessUnit,
 ) error {
+	if s.context.IsRemote {
+		return s.appDeps.Client.UpdateAccessUnit(
+			s.context.SelectedSot.Address,
+			accessUnit.ID,
+			accessUnit,
+		)
+	}
 	return s.accesscontrolService.UpdateUnit(
 		s.context.SelectedSot.ID,
 		accessUnit,
@@ -151,6 +196,12 @@ func (s *Service) UpdateUnit(
 func (s *Service) DeleteUnit(
 	unitID string,
 ) error {
+	if s.context.IsRemote {
+		return s.appDeps.Client.DeleteAccessUnit(
+			s.context.SelectedSot.Address,
+			unitID,
+		)
+	}
 	return s.accesscontrolService.DeleteUnit(
 		s.context.SelectedSot.ID,
 		unitID,
@@ -161,6 +212,13 @@ func (s *Service) SetRevokeUnit(
 	unitID string,
 	isRevoked bool,
 ) error {
+	if s.context.IsRemote {
+		return s.appDeps.Client.SetRevokeAccessUnit(
+			s.context.SelectedSot.Address,
+			unitID,
+			isRevoked,
+		)
+	}
 	return s.accesscontrolService.SetRevokeUnit(
 		s.context.SelectedSot.ID,
 		unitID,
@@ -171,8 +229,42 @@ func (s *Service) SetRevokeUnit(
 func (s *Service) UnitList(
 	groupID string,
 ) ([]tacenvacontract.AccessUnitWithUserCount, error) {
+	if s.context.IsRemote {
+		return s.appDeps.Client.ListAccessUnits(
+			s.context.SelectedSot.Address,
+			groupID,
+		)
+	}
 	return s.accesscontrolService.UnitList(
 		s.context.SelectedSot.ID,
 		groupID,
 	)
+}
+
+func (s *Service) SetApprovalUser(
+	userID string,
+	isRevoked bool,
+) error {
+	if s.context.IsRemote {
+		return s.appDeps.Client.SetApprovalUser(
+			s.context.SelectedSot.Address,
+			userID,
+			isRevoked,
+		)
+	}
+
+	return s.accesscontrolService.SetApprovalUser(userID, isRevoked)
+}
+
+func (s *Service) DeleteUser(
+	userID string,
+) error {
+	if s.context.IsRemote {
+		return s.appDeps.Client.DeleteUser(
+			s.context.SelectedSot.Address,
+			userID,
+		)
+	}
+
+	return s.accesscontrolService.DeleteUser(userID)
 }

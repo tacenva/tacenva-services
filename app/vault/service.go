@@ -134,7 +134,7 @@ func (s *Service) List() ([]tacpassentity.Vault, bool, error) {
 		return vaultList, false, nil
 	}
 
-	switch *s.context.SelectedSot.SyncMode {
+	switch s.context.SelectedSot.SyncMode {
 	case operationsEntity.SyncModeAuto:
 		err = s.SyncVault()
 		return vaultList, err != nil, err
@@ -342,7 +342,7 @@ func (s *Service) CreateVault(
 		return err
 	}
 
-	if *s.context.SelectedSot.SyncMode == operationsEntity.SyncModeAuto {
+	if s.context.SelectedSot.SyncMode == operationsEntity.SyncModeAuto {
 		err = s.SyncVault()
 	}
 
@@ -407,7 +407,7 @@ func (s *Service) UpdateVault(
 		return err
 	}
 
-	if *s.context.SelectedSot.SyncMode == operationsEntity.SyncModeAuto {
+	if s.context.SelectedSot.SyncMode == operationsEntity.SyncModeAuto {
 		if err = s.SyncVault(); err != nil {
 			return err
 		}
@@ -461,7 +461,7 @@ func (s *Service) DeleteVault(
 		return err
 	}
 
-	if *s.context.SelectedSot.SyncMode == operationsEntity.SyncModeAuto {
+	if s.context.SelectedSot.SyncMode == operationsEntity.SyncModeAuto {
 		err = s.SyncVault()
 		if err != nil {
 			return err

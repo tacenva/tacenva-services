@@ -310,7 +310,7 @@ func (s *Service) Create(
 	newSot := entity.SourceOfTruth{
 		Hostname: sotHostname,
 		Address:  address,
-		SyncMode: &syncMode,
+		SyncMode: syncMode,
 
 		Auth: &entity.Auth{
 			Token:               response.AuthToken,
@@ -528,7 +528,7 @@ func (s *Service) Delete(
 func (s *Service) CheckStatus(
 	sot *entity.SourceOfTruth,
 ) error {
-	authData, err := s.appDeps.Client.CheckStatus(sot.Address)
+	authData, err := s.appDeps.Client.GetAuthData(sot.Address)
 	if err != nil {
 		return err
 	}

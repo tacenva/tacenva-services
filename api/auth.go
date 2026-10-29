@@ -22,33 +22,18 @@ func (c *Client) Enroll(
 	return &response, nil
 }
 
-func (c *Client) CheckStatus(
+func (c *Client) GetAuthData(
 	address string,
 ) (*tacenvacontract.AuthData, error) {
 	var response tacenvacontract.AuthData
 
 	if err := c.Get(
 		address,
-		"/auth/status",
+		"/auth/",
 		&response,
 	); err != nil {
 		return nil, err
 	}
 
 	return &response, nil
-}
-
-func (c *Client) GroupAssignment(
-	address string,
-) (*tacenvacontract.GroupAssignment, error) {
-	var groupAssignment tacenvacontract.GroupAssignment
-	if err := c.Get(
-		address,
-		"/auth/group",
-		&groupAssignment,
-	); err != nil {
-		return nil, err
-	}
-
-	return &groupAssignment, nil
 }

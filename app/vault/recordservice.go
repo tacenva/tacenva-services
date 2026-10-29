@@ -79,7 +79,7 @@ func (s *Service) AppendRecord(
 
 	record.ID = recordID
 
-	if *s.context.SelectedSot.SyncMode == operationsEntity.SyncModeAuto {
+	if s.context.SelectedSot.SyncMode == operationsEntity.SyncModeAuto {
 		err = s.SyncRecord(vault)
 		if err != nil {
 			return nil, err
@@ -163,7 +163,7 @@ func (s *Service) UpdateRecord(
 		}
 	}
 
-	if *s.context.SelectedSot.SyncMode == operationsEntity.SyncModeAuto {
+	if s.context.SelectedSot.SyncMode == operationsEntity.SyncModeAuto {
 		err = s.SyncRecord(vault)
 		if err != nil {
 			return nil, err
@@ -235,7 +235,7 @@ func (s *Service) DeleteRecord(
 		}
 	}
 
-	if *s.context.SelectedSot.SyncMode == operationsEntity.SyncModeAuto {
+	if s.context.SelectedSot.SyncMode == operationsEntity.SyncModeAuto {
 		err := s.SyncRecord(vault)
 		if err != nil {
 			return err
@@ -420,7 +420,7 @@ func (s *Service) ListRecord(
 		return records, false, nil
 	}
 
-	switch *s.context.SelectedSot.SyncMode {
+	switch s.context.SelectedSot.SyncMode {
 	case operationsEntity.SyncModeAuto:
 		if err := s.SyncRecord(vault); err != nil {
 			return records, true, err
