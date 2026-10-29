@@ -33,6 +33,11 @@ func NewService(
 	}
 }
 
+func (s *Service) SetSelectedGroup(selectedGroup *tacenvaentity.AccessGroup) {
+	s.selectedGroup = selectedGroup
+	s.keyPairOfSelectedGroup = keyring.FromPublicKey(selectedGroup.PublicKey)
+}
+
 func (s *Service) CreateGroup(
 	newAccessGroup *tacenvaentity.AccessGroup,
 	adminUnit *tacenvaentity.AccessUnit,
@@ -43,6 +48,7 @@ func (s *Service) CreateGroup(
 		return err
 	}
 	adminUnit.PublicKey = keyPairForAccessUnit.PublicKey
+	adminUnit.SotID = s.selectedGroup.ID
 
 	keyPairForAccessGroup, err := keyring.GenerateKeyPair()
 	if err != nil {
@@ -59,7 +65,7 @@ func (s *Service) CreateGroup(
 	wrappedHierarchyKey := ""
 	if parentAccess {
 		if s.keyPairOfSelectedGroup == nil {
-			return errors.New("Your group have no access to parent group")
+			return errors.New("Parent group have not selected yet")
 		}
 
 		wrappedHierarchyKey, err = s.keyPairOfSelectedGroup.Seal(
@@ -109,52 +115,64 @@ func (s *Service) GroupWithChildren(
 }
 
 func (s *Service) CreateUnit(
-	sotID string,
 	accessUnit *tacenvaentity.AccessUnit,
-	wrappedGroupKey string,
 ) error {
+	keyPairForAccessUnit, err := keyring.GenerateKeyPair()
+	if err != nil {
+		return err
+	}
+
+	accessUnit.PublicKey = keyPairForAccessUnit.PublicKey
+	accessUnit.GroupID = s.selectedGroup.ID
+	accessUnit.SotID = s.context.SelectedSot.ID
+	// sementara
+	unwrappedGroupKey := s.context.SelectedSot.AccessGroup.KeyPair.PrivateKey
+	wrappedGroupKey, err := keyPairForAccessUnit.Seal([]byte(unwrappedGroupKey))
+	if err != nil {
+		return err
+	}
+
 	return s.accesscontrolService.CreateUnit(
-		sotID,
+		s.context.SelectedSot.ID,
 		accessUnit,
 		wrappedGroupKey,
 	)
 }
 
 func (s *Service) UpdateUnit(
-	sotID string,
 	accessUnit *tacenvaentity.AccessUnit,
 ) error {
 	return s.accesscontrolService.UpdateUnit(
-		sotID,
+		s.context.SelectedSot.ID,
 		accessUnit,
 	)
 }
 
 func (s *Service) DeleteUnit(
-	sotID string,
 	unitID string,
 ) error {
 	return s.accesscontrolService.DeleteUnit(
-		sotID,
+		s.context.SelectedSot.ID,
 		unitID,
 	)
 }
 
 func (s *Service) SetRevokeUnit(
-	sotID string,
 	unitID string,
 	isRevoked bool,
 ) error {
 	return s.accesscontrolService.SetRevokeUnit(
-		sotID,
+		s.context.SelectedSot.ID,
 		unitID,
 		isRevoked,
 	)
 }
 
-func (s *Service) UnitListt(
-	sotID string,
+func (s *Service) UnitList(
 	groupID string,
 ) ([]tacenvacontract.AccessUnitWithUserCount, error) {
-	return s.accesscontrolService.UnitList(sotID, groupID)
+	return s.accesscontrolService.UnitList(
+		s.context.SelectedSot.ID,
+		groupID,
+	)
 }

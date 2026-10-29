@@ -318,7 +318,7 @@ func (s *Service) Create(
 			KeyPairOfAccessUnit: keyPairOfAccessUnit,
 		},
 
-		TLSFingerprint: fingerprint,
+		TLSFingerprint: &fingerprint,
 	}
 
 	if response.GroupAssignment != nil {
@@ -394,7 +394,7 @@ func (s *Service) ResetTLSFingerprint(
 	}
 
 	// Hapus fingerprint lama dari persisted SoT.
-	sot.TLSFingerprint = ""
+	sot.TLSFingerprint = nil
 
 	// Persist state baru.
 	if err := s.Update(sot); err != nil {
@@ -411,7 +411,7 @@ func (s *Service) ResetTLSFingerprint(
 				fingerprint string,
 			) error {
 				// Simpan fingerprint baru.
-				sot.TLSFingerprint = fingerprint
+				sot.TLSFingerprint = &fingerprint
 
 				return s.Update(sot)
 			},

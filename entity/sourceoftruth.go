@@ -21,7 +21,7 @@ type SourceOfTruth struct {
 	Auth        *Auth        `json:"auth,omitempty"`
 	AccessGroup *AccessGroup `json:"access_group,omitempty"`
 
-	TLSFingerprint string `json:"tls_fingerprint"`
+	TLSFingerprint *string `json:"tls_fingerprint,omitempty"`
 }
 
 type AccessGroup struct {
