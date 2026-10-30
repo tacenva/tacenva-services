@@ -24,12 +24,18 @@ func (c *Client) Enroll(
 
 func (c *Client) GetAuthData(
 	address string,
-) (*tacenvacontract.AuthData, error) {
-	var response tacenvacontract.AuthData
+	accessGroupLastChangeID string,
+) (*tacenvacontract.AuthDataResp, error) {
+	request := tacenvacontract.AuthDataReq{
+		AccessGroupLastChangeID: accessGroupLastChangeID,
+	}
 
-	if err := c.Get(
+	var response tacenvacontract.AuthDataResp
+
+	if err := c.Query(
 		address,
 		"/auth/",
+		request,
 		&response,
 	); err != nil {
 		return nil, err

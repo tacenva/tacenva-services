@@ -70,7 +70,6 @@ func (s *Service) AppendRecord(
 			[]byte(encrypted),
 			s.context.SelectedSot.ID,
 			&syncChangeID,
-			"",
 		)
 		if err != nil {
 			return nil, err
@@ -156,7 +155,6 @@ func (s *Service) UpdateRecord(
 			[]byte(encrypted),
 			s.context.SelectedSot.ID,
 			&syncChangeID,
-			"",
 		)
 		if err != nil {
 			return nil, err
@@ -228,7 +226,6 @@ func (s *Service) DeleteRecord(
 			record.ID,
 			s.context.SelectedSot.ID,
 			&syncChangeID,
-			s.context.SelectedSot.Hostname,
 		)
 		if err != nil {
 			return err

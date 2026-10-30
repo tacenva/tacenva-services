@@ -16,7 +16,6 @@ import (
 	"github.com/tacenva/tacenva-core/auth"
 	"github.com/tacenva/tacenva-core/config"
 	tacenvacontract "github.com/tacenva/tacenva-core/contract"
-	"github.com/tacenva/tacenva-core/debug"
 	tacenvaentity "github.com/tacenva/tacenva-core/entity"
 	"github.com/tacenva/tacenva-core/util/keyring"
 	"github.com/tacenva/tacenva-services/api"
@@ -529,7 +528,12 @@ func (s *Service) Delete(
 func (s *Service) CheckStatus(
 	sot *entity.SourceOfTruth,
 ) error {
-	authData, err := s.appDeps.Client.GetAuthData(sot.Address)
+	accessGroupLastChangeID := ""
+	if sot.AccessGroup != nil {
+		accessGroupLastChangeID = sot.AccessGroup.LastChangeID
+	}
+
+	authData, err := s.appDeps.Client.GetAuthData(sot.Address, accessGroupLastChangeID)
 	if err != nil {
 		return err
 	}
@@ -546,8 +550,8 @@ func (s *Service) CheckStatus(
 		changed = true
 	}
 
-	debug.LogJSON("authdata", authData)
-	debug.LogJSON("sot", sot)
+	// debug.LogJSON("authdata", authData)
+	// debug.LogJSON("sot", sot)
 
 	if authData.GroupAssignment != nil &&
 		(sot.AccessGroup == nil ||
@@ -558,6 +562,7 @@ func (s *Service) CheckStatus(
 		}
 
 		sot.AccessGroup.ID = authData.GroupAssignment.ID
+		sot.AccessGroup.LastChangeID = authData.GroupAssignment.LastChangeID
 
 		if err := s.accessControlService.SyncGroups(
 			sot.ID,
