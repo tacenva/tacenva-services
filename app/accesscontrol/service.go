@@ -54,6 +54,7 @@ func (s *Service) CreateGroup(
 	if err != nil {
 		return err
 	}
+	newAccessGroup.PublicKey = keyPairForAccessGroup.PublicKey
 
 	wrappedGroupKey, err := keyPairForAccessUnit.Seal(
 		[]byte(keyPairForAccessGroup.PrivateKey),
@@ -172,7 +173,7 @@ func (s *Service) CreateUnit(
 		)
 	}
 	return s.accesscontrolService.CreateUnit(
-		s.context.SelectedSot.ID,
+		s.context.AuthorizedUser,
 		&req,
 	)
 }
@@ -188,7 +189,7 @@ func (s *Service) UpdateUnit(
 		)
 	}
 	return s.accesscontrolService.UpdateUnit(
-		s.context.SelectedSot.ID,
+		s.context.AuthorizedUser,
 		accessUnit,
 	)
 }
@@ -203,7 +204,7 @@ func (s *Service) DeleteUnit(
 		)
 	}
 	return s.accesscontrolService.DeleteUnit(
-		s.context.SelectedSot.ID,
+		s.context.AuthorizedUser,
 		unitID,
 	)
 }
@@ -220,7 +221,7 @@ func (s *Service) SetRevokeUnit(
 		)
 	}
 	return s.accesscontrolService.SetRevokeUnit(
-		s.context.SelectedSot.ID,
+		s.context.AuthorizedUser,
 		unitID,
 		isRevoked,
 	)
@@ -236,7 +237,7 @@ func (s *Service) UnitList(
 		)
 	}
 	return s.accesscontrolService.UnitList(
-		s.context.SelectedSot.ID,
+		s.context.AuthorizedUser,
 		groupID,
 	)
 }
@@ -253,7 +254,7 @@ func (s *Service) SetApprovalUser(
 		)
 	}
 
-	return s.accesscontrolService.SetApprovalUser(userID, isRevoked)
+	return s.accesscontrolService.SetApprovalUser(s.context.AuthorizedUser, userID, isRevoked)
 }
 
 func (s *Service) DeleteUser(
@@ -266,5 +267,5 @@ func (s *Service) DeleteUser(
 		)
 	}
 
-	return s.accesscontrolService.DeleteUser(userID)
+	return s.accesscontrolService.DeleteUser(s.context.AuthorizedUser, userID)
 }

@@ -82,10 +82,6 @@ func (c *Client) AccessGroupWithChildren(
 ) ([]tacenvacontract.AccessGroupTree, error) {
 	groupID = strings.TrimSpace(groupID)
 
-	if groupID == "" {
-		return nil, fmt.Errorf("access group id is required")
-	}
-
 	var groups []tacenvacontract.AccessGroupTree
 
 	if err := c.Get(

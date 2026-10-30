@@ -16,6 +16,7 @@ import (
 	"github.com/tacenva/tacenva-core/auth"
 	"github.com/tacenva/tacenva-core/config"
 	tacenvacontract "github.com/tacenva/tacenva-core/contract"
+	"github.com/tacenva/tacenva-core/debug"
 	tacenvaentity "github.com/tacenva/tacenva-core/entity"
 	"github.com/tacenva/tacenva-core/util/keyring"
 	"github.com/tacenva/tacenva-services/api"
@@ -545,8 +546,17 @@ func (s *Service) CheckStatus(
 		changed = true
 	}
 
+	debug.LogJSON("authdata", authData)
+	debug.LogJSON("sot", sot)
+
 	if authData.GroupAssignment != nil &&
-		sot.AccessGroup.ID != authData.GroupAssignment.ID {
+		(sot.AccessGroup == nil ||
+			sot.AccessGroup.ID != authData.GroupAssignment.ID) {
+
+		if sot.AccessGroup == nil {
+			sot.AccessGroup = &entity.AccessGroup{}
+		}
+
 		sot.AccessGroup.ID = authData.GroupAssignment.ID
 
 		if err := s.accessControlService.SyncGroups(
