@@ -12,7 +12,6 @@ import (
 func (s *Service) AppendRecord(
 	vault *coreEntity.Vault,
 	record *coreEntity.VaultRecord,
-	wrappedKey string,
 ) (*coreEntity.VaultRecord, error) {
 	if vault == nil {
 		return nil, errors.New(
@@ -54,7 +53,7 @@ func (s *Service) AppendRecord(
 
 	if !s.context.IsRemote {
 		err = s.vaultrecordService.Local.CreateOnSot(
-			s.authorizedUser,
+			s.context.AuthorizedUser,
 			&recordID,
 			[]byte(encrypted),
 			s.context.SelectedSot.ID,
@@ -90,7 +89,6 @@ func (s *Service) AppendRecord(
 func (s *Service) UpdateRecord(
 	vault *coreEntity.Vault,
 	record *coreEntity.VaultRecord,
-	wrappedKey string,
 ) (*coreEntity.VaultRecord, error) {
 	if vault == nil {
 		return nil, errors.New(
@@ -139,7 +137,7 @@ func (s *Service) UpdateRecord(
 		}
 
 		err = s.vaultrecordService.Local.UpdateOnSot(
-			s.authorizedUser,
+			s.context.AuthorizedUser,
 			record.ID,
 			[]byte(encrypted),
 			s.context.SelectedSot.ID,
@@ -212,7 +210,7 @@ func (s *Service) DeleteRecord(
 	var syncChangeID string
 	if !s.context.IsRemote {
 		err := s.vaultrecordService.Local.DeleteOnSot(
-			s.authorizedUser,
+			s.context.AuthorizedUser,
 			record.ID,
 			s.context.SelectedSot.ID,
 			&syncChangeID,
@@ -354,52 +352,51 @@ func (s *Service) getClientRecordChanges(
 	return pendingChanges, changeCount, nil
 }
 
-func (s *Service) ListRecord(
+func (s *Service) SelectVault(
 	vault *coreEntity.Vault,
-	wrappedKey string,
-) ([]coreEntity.VaultRecord, bool, error) {
+	wrappedVaulKey string,
+) error {
 	if vault == nil {
-		return nil, false, errors.New(
+		return errors.New(
 			"vault cannot be nil",
 		)
 	}
 
 	if vault.ID == "" {
-		return nil, false, errors.New(
+		return errors.New(
 			"vault id cannot be empty",
 		)
 	}
 
 	if s.context == nil {
-		return nil, false, errors.New(
+		return errors.New(
 			"context is nil",
 		)
 	}
 
 	if s.context.SelectedSot == nil {
-		return nil, false, errors.New(
+		return errors.New(
 			"selected source of truth is nil",
 		)
 	}
 
+	unwrappedVaultKey, err := s.context.SelectedSot.AccessGroup.KeyPair.Open(wrappedVaulKey)
+	if err != nil {
+		return err
+	}
+	return s.vaultrecordService.Local.SetConfig(
+		vault.ID,
+		string(unwrappedVaultKey),
+	)
+}
+
+func (s *Service) ListRecord(
+	vault *coreEntity.Vault,
+) ([]coreEntity.VaultRecord, bool, error) {
 	records, err := s.vaultrecordService.Local.List()
 
 	if err != nil {
 		if err == database.ErrFileNotFound && s.context.IsRemote {
-			// recordBlob, err := s.appDeps.Client.GetRecordBlob(
-			// 	s.context.SelectedSot.Address,
-			// 	vault.ID,
-			// )
-			// if err != nil {
-			// 	return nil, false, err
-			// }
-
-			// db := database.New("vaultDir")
-			// err = db.Write(vault.ID, recordBlob)
-			// if err != nil {
-			// 	return nil, false, err
-			// }
-
 			records, err = s.vaultrecordService.Local.List()
 			if err != nil {
 				return nil, false, err

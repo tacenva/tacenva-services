@@ -7,7 +7,6 @@ import (
 	"github.com/tacenva/tacenva-services/app"
 	"github.com/tacenva/tacenva-services/app/sourceoftruth"
 
-	"github.com/tacenva/tacenva-core/auth"
 	tacenvaentity "github.com/tacenva/tacenva-core/entity"
 	"github.com/tacenva/tacenva-core/util/keyring"
 	operationsEntity "github.com/tacenva/tacenva-services/entity"
@@ -28,8 +27,7 @@ type Service struct {
 	vaultService       *vaultCore.Service
 	vaultrecordService *vaultrecordCore.Service
 
-	authorizedUser *tacenvaentity.User
-	vaultDir       *string
+	vaultDir *string
 }
 
 func NewService(
@@ -37,28 +35,13 @@ func NewService(
 	context *app.Context,
 	vaultService *vaultCore.Service,
 	vaultrecordService *vaultrecordCore.Service,
-	authService *auth.Service,
 	sotService *sourceoftruth.Service,
 ) *Service {
-	var authorizedUser *tacenvaentity.User
-	// if !context.IsRemote {
-	// 	user, err := authService.GetUserData(
-	// 		context.SelectedSot.Auth.Token,
-	// 	)
-	// 	if err != nil {
-	// 		return nil
-	// 	}
-
-	// 	authorizedUser = user
-	// }
-
 	return &Service{
 		appDeps:            appDeps,
 		context:            context,
 		vaultService:       vaultService,
 		vaultrecordService: vaultrecordService,
-
-		authorizedUser: authorizedUser,
 	}
 }
 
@@ -118,7 +101,7 @@ func (s *Service) List() ([]tacpassentity.Vault, bool, error) {
 	)
 
 	if !s.context.IsRemote {
-		vaultList, err = s.vaultService.Sot.List(s.authorizedUser)
+		vaultList, err = s.vaultService.Sot.List(s.context.AuthorizedUser)
 		if err != nil {
 			return nil, false, err
 		}
@@ -315,7 +298,7 @@ func (s *Service) CreateVault(
 
 	if !s.context.IsRemote {
 		err := s.vaultService.Sot.Create(
-			s.authorizedUser,
+			s.context.AuthorizedUser,
 			&tacpassentity.Vault{
 				Name:     vaultName,
 				GroupIDs: groupIDs,
@@ -389,7 +372,7 @@ func (s *Service) UpdateVault(
 		unwrappedVaultKey, err := s.context.SelectedSot.AccessGroup.KeyPair.Open(wrappedVaultKey)
 
 		err = s.vaultService.Sot.Update(
-			s.authorizedUser,
+			s.context.AuthorizedUser,
 			vault,
 			unwrappedVaultKey,
 			&syncChangeID,
@@ -443,7 +426,7 @@ func (s *Service) DeleteVault(
 
 	if !s.context.IsRemote {
 		err := s.vaultService.Sot.Delete(
-			s.authorizedUser,
+			s.context.AuthorizedUser,
 			vault.ID,
 			s.context.SelectedSot.ID,
 			&syncChangeID,
@@ -476,7 +459,7 @@ func (s *Service) GetWrappedVaultKey(
 ) (string, error) {
 	if !s.context.IsRemote {
 		return s.vaultService.Sot.GetWrappedKey(
-			s.authorizedUser,
+			s.context.AuthorizedUser,
 			vaultID,
 		)
 	}

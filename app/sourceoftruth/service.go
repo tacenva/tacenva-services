@@ -1,7 +1,6 @@
 package sourceoftruth
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -159,8 +158,6 @@ func (s *Service) ChangePassword(
 				continue
 			}
 
-			fmt.Print(err)
-
 			return err
 		}
 
@@ -168,8 +165,6 @@ func (s *Service) ChangePassword(
 			currentPassword,
 			newPassword,
 		); err != nil {
-			fmt.Print(err)
-
 			return err
 		}
 	}
@@ -474,13 +469,6 @@ func (s *Service) List() (
 			)
 		},
 	)
-
-	jsonData, err := json.MarshalIndent(sotData, "", "  ")
-	if err != nil {
-		fmt.Println("Gagal marshal JSON:", err)
-	} else {
-		fmt.Println(string(jsonData))
-	}
 
 	return sotData, nil
 }
