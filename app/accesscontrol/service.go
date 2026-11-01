@@ -1,11 +1,12 @@
 package accesscontrol
 
 import (
-	coreAC "github.com/tacenva/tacpass-core/accesscontrol"
-	"github.com/tacenva/tacpass-core/auth"
-	"github.com/tacenva/tacpass-core/entity"
-	"github.com/tacenva/tacpass-core/util/keyring"
-	coreVault "github.com/tacenva/tacpass-core/vault"
+	"errors"
+
+	tacenvaaccesscontrol "github.com/tacenva/tacenva-core/accesscontrol"
+	tacenvacontract "github.com/tacenva/tacenva-core/contract"
+	tacenvaentity "github.com/tacenva/tacenva-core/entity"
+	"github.com/tacenva/tacenva-core/util/keyring"
 
 	"github.com/tacenva/tacenva-services/app"
 )
@@ -14,159 +15,257 @@ type Service struct {
 	appDeps *app.Deps
 	context *app.Context
 
-	coreACService    *coreAC.Service
-	coreVaultService *coreVault.Service
-	authService      *auth.Service
+	accesscontrolService *tacenvaaccesscontrol.Service
 
-	remoteService *remoteService
-	localService  *localService
+	selectedGroup          *tacenvaentity.AccessGroup
+	keyPairOfSelectedGroup *keyring.KeyPair
 }
 
 func NewService(
 	appDeps *app.Deps,
 	context *app.Context,
-	coreACService *coreAC.Service,
-	authService *auth.Service,
+	accesscontrolService *tacenvaaccesscontrol.Service,
 ) *Service {
 	return &Service{
-		appDeps:       appDeps,
-		context:       context,
-		coreACService: coreACService,
-		authService:   authService,
-
-		remoteService: NewRemoteService(appDeps, context),
-		localService:  NewLocalService(appDeps, context, coreACService, authService),
+		appDeps:              appDeps,
+		context:              context,
+		accesscontrolService: accesscontrolService,
 	}
 }
 
-func (s *Service) List() ([]entity.Permission, error) {
-	if s.context.IsRemote {
-		return s.remoteService.List()
-	}
-	return s.localService.List()
+func (s *Service) SetSelectedGroup(selectedGroup *tacenvaentity.AccessGroup) {
+	s.selectedGroup = selectedGroup
+	s.keyPairOfSelectedGroup = keyring.FromPublicKey(selectedGroup.PublicKey)
 }
 
-func (s *Service) Get(
-	id string,
-) (*entity.Permission, error) {
-	if s.context.IsRemote {
-		return s.remoteService.Get(id)
-	}
-	return s.localService.Get(id)
-}
-
-func (s *Service) Create(
-	name string,
-	privilege entity.Privilege,
-) ([]entity.VaultAccess, *entity.Permission, *keyring.KeyPair, error) {
-	if s.context.IsRemote {
-		return s.remoteService.Create(name, privilege)
-	}
-	return s.localService.Create(name, privilege)
-}
-
-func (s *Service) ChangeName(
-	id string,
-	name string,
+func (s *Service) CreateGroup(
+	newAccessGroup *tacenvaentity.AccessGroup,
+	adminUnit *tacenvaentity.AccessUnit,
+	parentAccess bool,
 ) error {
-	if s.context.IsRemote {
-		return s.remoteService.ChangeName(id, name)
+	keyPairForAccessUnit, err := keyring.GenerateKeyPair()
+	if err != nil {
+		return err
 	}
-	return s.localService.ChangeName(id, name)
-}
+	adminUnit.PublicKey = keyPairForAccessUnit.PublicKey
+	adminUnit.SotID = s.selectedGroup.ID
 
-func (s *Service) ChangePrivilege(
-	id string,
-	privilege entity.Privilege,
-) error {
-	if s.context.IsRemote {
-		return s.remoteService.ChangePrivilege(id, privilege)
+	keyPairForAccessGroup, err := keyring.GenerateKeyPair()
+	if err != nil {
+		return err
 	}
-	return s.localService.ChangePrivilege(id, privilege)
-}
+	newAccessGroup.PublicKey = keyPairForAccessGroup.PublicKey
 
-func (s *Service) Revoke(
-	id string,
-) error {
-	if s.context.IsRemote {
-		return s.remoteService.Revoke(id)
-	}
-	return s.localService.Revoke(id)
-}
-
-func (s *Service) UserList(
-	permissionID string,
-) ([]entity.User, error) {
-	if s.context.IsRemote {
-		return s.remoteService.UserList(permissionID)
-	}
-	return s.localService.UserList(permissionID)
-}
-
-func (s *Service) ApproveUser(
-	userID string,
-) (*entity.User, error) {
-	if s.context.IsRemote {
-		return s.remoteService.ApproveUser(userID)
-	}
-	return s.localService.ApproveUser(userID)
-}
-
-func (s *Service) RevokeUser(
-	userID string,
-) (*entity.User, error) {
-	if s.context.IsRemote {
-		return s.remoteService.RevokeUser(userID)
-	}
-	return s.localService.RevokeUser(userID)
-}
-
-func (s *Service) DeleteAccessControl(
-	id string,
-) error {
-	if s.context.IsRemote {
-		return s.remoteService.DeleteAccessControl(id)
-	}
-	return s.localService.DeleteAccessControl(id)
-}
-
-func (s *Service) GrantPrivilege(
-	id string,
-	myVaultAccessList []entity.VaultAccess,
-	keyPair *keyring.KeyPair,
-) error {
-	newVaultAccessList := make([]entity.VaultAccess, 0, len(myVaultAccessList))
-
-	for _, vaultAccess := range myVaultAccessList {
-		vaultKey, err := s.context.SelectedSoT.KeyPair.Open(
-			vaultAccess.VaultKey,
-		)
-		if err != nil {
-			return err
-		}
-
-		encryptedVaultKey, err := keyPair.Seal(vaultKey)
-		if err != nil {
-			return err
-		}
-
-		newVaultAccessList = append(
-			newVaultAccessList,
-			entity.VaultAccess{
-				VaultID:      vaultAccess.VaultID,
-				PermissionID: id,
-				VaultKey:     encryptedVaultKey,
-			},
-		)
-	}
-
-	if s.context.IsRemote {
-		return s.remoteService.GrantPrivilege(
-			newVaultAccessList,
-		)
-	}
-
-	return s.localService.GrantPrivilege(
-		newVaultAccessList,
+	wrappedGroupKey, err := keyPairForAccessUnit.Seal(
+		[]byte(keyPairForAccessGroup.PrivateKey),
 	)
+	if err != nil {
+		return err
+	}
+
+	wrappedHierarchyKey := ""
+	if parentAccess {
+		if s.keyPairOfSelectedGroup == nil {
+			return errors.New("Parent group have not selected yet")
+		}
+
+		wrappedHierarchyKey, err = s.keyPairOfSelectedGroup.Seal(
+			[]byte(keyPairForAccessGroup.PrivateKey),
+		)
+		if err != nil {
+			return err
+		}
+	}
+
+	req := tacenvacontract.AccessGroupSetupRequest{
+		AccessGroup:         newAccessGroup,
+		AdminUnit:           adminUnit,
+		ParentGroupID:       s.selectedGroup.ID,
+		WrappedGroupKey:     wrappedGroupKey,
+		WrappedHierarchyKey: wrappedHierarchyKey,
+	}
+
+	if s.context.IsRemote {
+		return s.appDeps.Client.CreateAccessGroup(
+			s.context.SelectedSot.Address,
+			&req,
+		)
+	}
+	return s.accesscontrolService.CreateGroup(
+		s.context.AuthorizedUser,
+		&req,
+	)
+}
+
+func (s *Service) UpdateGroup(
+	toUpdateAccessGroup *tacenvaentity.AccessGroup,
+) error {
+	if s.context.IsRemote {
+		return s.appDeps.Client.UpdateAccessGroup(
+			s.context.SelectedSot.Address,
+			toUpdateAccessGroup.ID,
+			toUpdateAccessGroup,
+		)
+	}
+	return s.accesscontrolService.UpdateGroup(
+		s.context.AuthorizedUser,
+		toUpdateAccessGroup,
+	)
+}
+
+func (s *Service) DeleteGroup(
+	groupID string,
+) error {
+	if s.context.IsRemote {
+		return s.appDeps.Client.DeleteAccessGroup(
+			s.context.SelectedSot.Address,
+			groupID,
+		)
+	}
+	return s.accesscontrolService.DeleteGroup(
+		s.context.AuthorizedUser,
+		groupID,
+	)
+}
+
+func (s *Service) GroupWithChildren(
+	selectedGroup *tacenvaentity.AccessGroup,
+) ([]tacenvacontract.AccessGroupTree, error) {
+	selectedGroupID := ""
+	if selectedGroup != nil {
+		selectedGroupID = selectedGroup.ID
+	}
+	if s.context.IsRemote {
+		return s.appDeps.Client.AccessGroupWithChildren(
+			s.context.SelectedSot.Address,
+			selectedGroupID,
+		)
+	}
+	return s.accesscontrolService.GroupWithChildren(s.context.AuthorizedUser, selectedGroupID)
+}
+
+func (s *Service) CreateUnit(
+	accessUnit *tacenvaentity.AccessUnit,
+) error {
+	keyPairForAccessUnit, err := keyring.GenerateKeyPair()
+	if err != nil {
+		return err
+	}
+
+	accessUnit.PublicKey = keyPairForAccessUnit.PublicKey
+	accessUnit.GroupID = s.selectedGroup.ID
+	accessUnit.SotID = s.context.SelectedSot.ID
+	unwrappedGroupKey := s.keyPairOfSelectedGroup.PrivateKey
+	wrappedGroupKey, err := keyPairForAccessUnit.Seal([]byte(unwrappedGroupKey))
+	if err != nil {
+		return err
+	}
+
+	req := tacenvacontract.AccessUnitSetupReq{
+		AccessUnit:      accessUnit,
+		WrappedGroupKey: wrappedGroupKey,
+	}
+
+	if s.context.IsRemote {
+		return s.appDeps.Client.CreateAccessUnit(
+			s.context.SelectedSot.Address,
+			&req,
+		)
+	}
+	return s.accesscontrolService.CreateUnit(
+		s.context.AuthorizedUser,
+		&req,
+	)
+}
+
+func (s *Service) UpdateUnit(
+	accessUnit *tacenvaentity.AccessUnit,
+) error {
+	if s.context.IsRemote {
+		return s.appDeps.Client.UpdateAccessUnit(
+			s.context.SelectedSot.Address,
+			accessUnit.ID,
+			accessUnit,
+		)
+	}
+	return s.accesscontrolService.UpdateUnit(
+		s.context.AuthorizedUser,
+		accessUnit,
+	)
+}
+
+func (s *Service) DeleteUnit(
+	unitID string,
+) error {
+	if s.context.IsRemote {
+		return s.appDeps.Client.DeleteAccessUnit(
+			s.context.SelectedSot.Address,
+			unitID,
+		)
+	}
+	return s.accesscontrolService.DeleteUnit(
+		s.context.AuthorizedUser,
+		unitID,
+	)
+}
+
+func (s *Service) SetRevokeUnit(
+	unitID string,
+	isRevoked bool,
+) error {
+	if s.context.IsRemote {
+		return s.appDeps.Client.SetRevokeAccessUnit(
+			s.context.SelectedSot.Address,
+			unitID,
+			isRevoked,
+		)
+	}
+	return s.accesscontrolService.SetRevokeUnit(
+		s.context.AuthorizedUser,
+		unitID,
+		isRevoked,
+	)
+}
+
+func (s *Service) UnitList(
+	groupID string,
+) ([]tacenvacontract.AccessUnitWithUserCount, error) {
+	if s.context.IsRemote {
+		return s.appDeps.Client.ListAccessUnits(
+			s.context.SelectedSot.Address,
+			groupID,
+		)
+	}
+	return s.accesscontrolService.UnitList(
+		s.context.AuthorizedUser,
+		groupID,
+	)
+}
+
+func (s *Service) SetApprovalUser(
+	userID string,
+	isRevoked bool,
+) error {
+	if s.context.IsRemote {
+		return s.appDeps.Client.SetApprovalUser(
+			s.context.SelectedSot.Address,
+			userID,
+			isRevoked,
+		)
+	}
+
+	return s.accesscontrolService.SetApprovalUser(s.context.AuthorizedUser, userID, isRevoked)
+}
+
+func (s *Service) DeleteUser(
+	userID string,
+) error {
+	if s.context.IsRemote {
+		return s.appDeps.Client.DeleteUser(
+			s.context.SelectedSot.Address,
+			userID,
+		)
+	}
+
+	return s.accesscontrolService.DeleteUser(s.context.AuthorizedUser, userID)
 }

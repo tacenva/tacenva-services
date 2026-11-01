@@ -4,9 +4,12 @@ import (
 	"fmt"
 
 	"github.com/tacenva/database"
+	"github.com/tacenva/tacenva-core/config"
 	"github.com/tacenva/tacenva-services/api"
-	coreapp "github.com/tacenva/tacpass-core/app"
-	"github.com/tacenva/tacpass-core/config"
+	"github.com/tacenva/tacenva-services/app/server"
+	"github.com/tacenva/tacenva-services/internal/discovery/mdns"
+	"github.com/tacenva/tacenva-services/internal/discovery/vpn"
+	tacpassapp "github.com/tacenva/tacpass-core/app"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
@@ -17,9 +20,7 @@ func Setup(dev bool) (*Deps, error) {
 		return nil, err
 	}
 
-	tacenvaDB := database.New(
-		cfg.BaseDir,
-	)
+	tacenvaDB := database.New(cfg.BaseDir)
 
 	sqliteDB, err := openSQLite(
 		cfg.Path(config.AppDBFileName),
@@ -28,36 +29,41 @@ func Setup(dev bool) (*Deps, error) {
 		return nil, err
 	}
 
-	_, err = sqliteDB.DB()
-	if err != nil {
+	if _, err := sqliteDB.DB(); err != nil {
 		return nil, fmt.Errorf(
 			"get sqlite database: %w",
 			err,
 		)
 	}
-	// defer sqlDB.Close()
 
-	if err := coreapp.Migrate(sqliteDB); err != nil {
+	if err := tacpassapp.Migrate(sqliteDB); err != nil {
 		return nil, err
 	}
 
 	client := api.NewClient()
 
-	deps := Deps{
-		Config:   cfg,
-		AppDB:    tacenvaDB,
-		SqliteDB: sqliteDB,
-		Client:   client,
+	mdnsDiscoverer := mdns.NewDiscoverer()
+	vpnDiscoverer := vpn.NewDiscoverer("tun0")
+
+	serverService := server.NewService(
+		mdnsDiscoverer,
+		vpnDiscoverer,
+	)
+
+	deps := &Deps{
+		Config:        cfg,
+		AppDB:         tacenvaDB,
+		SqliteDB:      sqliteDB,
+		Client:        client,
+		ServerService: serverService,
 	}
 
-	return &deps, nil
+	return deps, nil
 }
 
-func openSQLite(
-	path string,
-) (*gorm.DB, error) {
+func openSQLite(path string) (*gorm.DB, error) {
 	db, err := gorm.Open(
-		sqlite.Open(path),
+		sqlite.Open(path+"?_foreign_keys=on"),
 		&gorm.Config{},
 	)
 	if err != nil {

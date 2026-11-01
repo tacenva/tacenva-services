@@ -5,105 +5,91 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
+
+	tacpasscontract "github.com/tacenva/tacpass-core/contract"
 )
 
-func (c *Client) CheckVaultSync(
+func (c *Client) GetVaultChanges(
 	address string,
-	replicaVaultHash string,
-	result any,
-) error {
-	body := struct {
-		ReplicaVaultHash string `json:"replica_vault_hash"`
-	}{
-		ReplicaVaultHash: replicaVaultHash,
+	startChangeID string,
+	limit int,
+) (*tacpasscontract.PendingVaultChange, error) {
+	var pendingChange tacpasscontract.PendingVaultChange
+	path := withSyncQuery(
+		"/vault/changes",
+		startChangeID,
+		limit,
+	)
+
+	if err := c.Get(
+		address,
+		path,
+		&pendingChange,
+	); err != nil {
+		return nil, fmt.Errorf(
+			"vault: %w",
+			err,
+		)
 	}
 
-	return c.Post(
-		address,
-		"/vault/sync/check",
-		body,
-		result,
-	)
+	return &pendingChange, nil
 }
 
-func (c *Client) VaultSync(
+func (c *Client) GetVaultChangesCount(
 	address string,
-	replicaVaultHash string,
-	result any,
-) error {
-	body := struct {
-		ReplicaVaultHash string `json:"replica_vault_hash"`
-	}{
-		ReplicaVaultHash: replicaVaultHash,
+	startChangeID string,
+) (*tacpasscontract.PendingTotalChanges, error) {
+	var pendingTotalChanges tacpasscontract.PendingTotalChanges
+	path := withStartChangeID(
+		"/vault/changes/count",
+		startChangeID,
+	)
+
+	if err := c.Get(
+		address,
+		path,
+		&pendingTotalChanges,
+	); err != nil {
+		return nil, fmt.Errorf(
+			"vault: %w",
+			err,
+		)
 	}
 
-	return c.Post(
-		address,
+	return &pendingTotalChanges, nil
+}
+
+func (c *Client) SyncVault(
+	address string,
+	startChangeID string,
+	limit int,
+	changes any,
+) (*tacpasscontract.PendingVaultChange, error) {
+	path := withSyncQuery(
 		"/vault/sync",
-		body,
-		result,
-	)
-}
-
-func (c *Client) CreateVault(
-	address string,
-	body any,
-	result any,
-) error {
-	return c.Post(
-		address,
-		"/vault",
-		body,
-		result,
-	)
-}
-
-func (c *Client) GetRecord(
-	address string,
-	vaultID string,
-	recordID string,
-	result any,
-) error {
-	path := fmt.Sprintf(
-		"/vault/%s/record/%s",
-		vaultID,
-		recordID,
+		startChangeID,
+		limit,
 	)
 
-	return c.Get(
+	var successList tacpasscontract.PendingVaultChange
+
+	err := c.Post(
 		address,
 		path,
-		result,
+		changes,
+		&successList,
 	)
-}
-
-func (c *Client) CheckRecordBlob(
-	address string,
-	vaultID string,
-	replicaVersion uint64,
-	result any,
-) error {
-	path := fmt.Sprintf(
-		"/vault/%s/record/blob/check",
-		vaultID,
-	)
-
-	body := struct {
-		ReplicaVersion uint64 `json:"replica_version"`
-	}{
-		ReplicaVersion: replicaVersion,
+	if err != nil {
+		return nil, err
 	}
 
-	return c.Post(
-		address,
-		path,
-		body,
-		result,
-	)
+	return &successList, nil
 }
 
-func (c *Client) RecordBlob(
+func (c *Client) GetRecordBlob(
 	address string,
 	vaultID string,
 ) ([]byte, error) {
@@ -113,50 +99,25 @@ func (c *Client) RecordBlob(
 	)
 
 	return c.doRaw(
-		http.MethodPost,
+		http.MethodGet,
 		address,
 		path,
 		nil,
 	)
 }
 
-func (c *Client) CreateRecordRaw(
+func (c *Client) StoreRecordBlob(
 	address string,
 	vaultID string,
-	data []byte,
-) (string, error) {
-	path := fmt.Sprintf(
-		"/vault/%s/record",
-		vaultID,
-	)
-
-	body, err := c.doRaw(
-		http.MethodPost,
-		address,
-		path,
-		data,
-	)
-	if err != nil {
-		return "", err
-	}
-
-	return strings.TrimSpace(string(body)), nil
-}
-
-func (c *Client) UpdateRecordRaw(
-	address string,
-	vaultID string,
-	recordID string,
 	data []byte,
 ) error {
 	path := fmt.Sprintf(
-		"/vault/%s/record/%s",
+		"/vault/%s/record/blob",
 		vaultID,
-		recordID,
 	)
 
 	_, err := c.doRaw(
-		http.MethodPut,
+		http.MethodPost,
 		address,
 		path,
 		data,
@@ -165,22 +126,143 @@ func (c *Client) UpdateRecordRaw(
 	return err
 }
 
-func (c *Client) DeleteRecord(
+func (c *Client) GetRecordChanges(
 	address string,
 	vaultID string,
-	recordID string,
-) error {
+	startChangeID string,
+	limit int,
+) (*tacpasscontract.PendingVaultRecordChange, error) {
+	var pendingChange tacpasscontract.PendingVaultRecordChange
 	path := fmt.Sprintf(
-		"/vault/%s/record/%s",
+		"/vault/%s/record/changes",
 		vaultID,
-		recordID,
 	)
 
-	return c.Delete(
+	path = withSyncQuery(
+		path,
+		startChangeID,
+		limit,
+	)
+
+	if err := c.Get(
 		address,
 		path,
+		&pendingChange,
+	); err != nil {
+		return nil, fmt.Errorf(
+			"vault: %w",
+			err,
+		)
+	}
+
+	return &pendingChange, nil
+}
+
+func (c *Client) GetRecordChangesCount(
+	address string,
+	vaultID string,
+	startChangeID string,
+) (*tacpasscontract.PendingTotalChanges, error) {
+	var pendingTotalChanges tacpasscontract.PendingTotalChanges
+	path := fmt.Sprintf(
+		"/vault/%s/record/changes/count",
+		vaultID,
+	)
+
+	path = withStartChangeID(
+		path,
+		startChangeID,
+	)
+
+	if err := c.Get(
+		address,
+		path,
+		&pendingTotalChanges,
+	); err != nil {
+		return nil, fmt.Errorf(
+			"vault: %w",
+			err,
+		)
+	}
+
+	return &pendingTotalChanges, nil
+}
+
+func (c *Client) SyncRecords(
+	address string,
+	vaultID string,
+	startChangeID string,
+	limit int,
+	changes any,
+) error {
+	path := fmt.Sprintf(
+		"/vault/%s/record/sync",
+		vaultID,
+	)
+
+	path = withSyncQuery(
+		path,
+		startChangeID,
+		limit,
+	)
+
+	err := c.Post(
+		address,
+		path,
+		changes,
 		nil,
 	)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func withStartChangeID(
+	path string,
+	startChangeID string,
+) string {
+	return withStartQuery(
+		path,
+		"start_change_id",
+		startChangeID,
+	)
+}
+
+func withStartQuery(
+	path string,
+	key string,
+	value string,
+) string {
+	query := url.Values{}
+
+	query.Set(
+		key,
+		value,
+	)
+
+	return path + "?" + query.Encode()
+}
+
+func withSyncQuery(
+	path string,
+	startChangeID string,
+	limit int,
+) string {
+	query := url.Values{}
+
+	query.Set(
+		"start_change_id",
+		startChangeID,
+	)
+
+	query.Set(
+		"limit",
+		strconv.Itoa(limit),
+	)
+
+	return path + "?" + query.Encode()
 }
 
 func (c *Client) doRaw(
@@ -257,39 +339,4 @@ func (c *Client) doRaw(
 	}
 
 	return body, nil
-}
-
-func (c *Client) UpdateVault(
-	address string,
-	vaultID string,
-	body any,
-	result any,
-) error {
-	path := fmt.Sprintf(
-		"/vault/%s",
-		vaultID,
-	)
-
-	return c.Put(
-		address,
-		path,
-		body,
-		result,
-	)
-}
-
-func (c *Client) DeleteVault(
-	address string,
-	vaultID string,
-) error {
-	path := fmt.Sprintf(
-		"/vault/%s",
-		vaultID,
-	)
-
-	return c.Delete(
-		address,
-		path,
-		nil,
-	)
 }

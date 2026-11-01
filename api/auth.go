@@ -1,21 +1,14 @@
 package api
 
-type EnrollRequest struct {
-	Hostname  string `json:"hostname"`
-	PublicKey string `json:"public_key"`
-}
-
-type EnrollResponse struct {
-	Status      string `json:"status"`
-	AuthToken   string `json:"auth_token"`
-	SoTHostname string `json:"sot_hostname"`
-}
+import (
+	tacenvacontract "github.com/tacenva/tacenva-core/contract"
+)
 
 func (c *Client) Enroll(
 	address string,
-	request EnrollRequest,
-) (*EnrollResponse, error) {
-	var response EnrollResponse
+	request tacenvacontract.EnrollRequest,
+) (*tacenvacontract.EnrollResponse, error) {
+	var response tacenvacontract.EnrollResponse
 
 	if err := c.PostPublic(
 		address,
@@ -29,34 +22,24 @@ func (c *Client) Enroll(
 	return &response, nil
 }
 
-type LoginRequest struct {
-	PublicKey string `json:"public_key"`
-}
-
-type LoginResponse struct {
-	Token string `json:"token"`
-}
-
-func (c *Client) Login(
+func (c *Client) GetAuthData(
 	address string,
-	request LoginRequest,
-) (*LoginResponse, error) {
-	var response LoginResponse
+	accessGroupLastChangeID string,
+) (*tacenvacontract.AuthDataResp, error) {
+	request := tacenvacontract.AuthDataReq{
+		AccessGroupLastChangeID: accessGroupLastChangeID,
+	}
 
-	if err := c.PostPublic(
+	var response tacenvacontract.AuthDataResp
+
+	if err := c.Query(
 		address,
-		"/auth/login",
+		"/auth/",
 		request,
 		&response,
 	); err != nil {
 		return nil, err
 	}
 
-	c.SetToken(response.Token)
-
 	return &response, nil
-}
-
-func (c *Client) Logout() {
-	c.ClearToken()
 }
