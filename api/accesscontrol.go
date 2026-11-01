@@ -293,7 +293,7 @@ func (c *Client) PublicKeyOfGroups(
 	groupIDs []string,
 ) (map[string]string, error) {
 	if len(groupIDs) == 0 {
-		return nil, fmt.Errorf("group ids are required")
+		return nil, nil
 	}
 
 	normalizedIDs := make([]string, 0, len(groupIDs))
@@ -314,7 +314,7 @@ func (c *Client) PublicKeyOfGroups(
 	}
 
 	if len(normalizedIDs) == 0 {
-		return nil, fmt.Errorf("group ids are required")
+		return nil, nil
 	}
 
 	var publicKeys map[string]string
