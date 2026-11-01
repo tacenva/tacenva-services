@@ -2,8 +2,10 @@ package vault
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/tacenva/database"
+	"github.com/tacenva/tacenva-core/config"
 	operationsEntity "github.com/tacenva/tacenva-services/entity"
 	"github.com/tacenva/tacpass-core/contract"
 	coreEntity "github.com/tacenva/tacpass-core/entity"
@@ -56,7 +58,6 @@ func (s *Service) AppendRecord(
 			s.context.AuthorizedUser,
 			&recordID,
 			[]byte(encrypted),
-			s.context.SelectedSot.ID,
 			&syncChangeID,
 			s.context.SelectedSot.Hostname,
 		)
@@ -67,7 +68,6 @@ func (s *Service) AppendRecord(
 		err = s.vaultrecordService.Local.CreateOnReplica(
 			&recordID,
 			[]byte(encrypted),
-			s.context.SelectedSot.ID,
 			&syncChangeID,
 		)
 		if err != nil {
@@ -132,15 +132,10 @@ func (s *Service) UpdateRecord(
 	var syncChangeID string
 
 	if !s.context.IsRemote {
-		if err != nil {
-			return nil, err
-		}
-
 		err = s.vaultrecordService.Local.UpdateOnSot(
 			s.context.AuthorizedUser,
 			record.ID,
 			[]byte(encrypted),
-			s.context.SelectedSot.ID,
 			&syncChangeID,
 			s.context.SelectedSot.Hostname,
 		)
@@ -151,7 +146,6 @@ func (s *Service) UpdateRecord(
 		err = s.vaultrecordService.Local.UpdateOnReplica(
 			record.ID,
 			[]byte(encrypted),
-			s.context.SelectedSot.ID,
 			&syncChangeID,
 		)
 		if err != nil {
@@ -212,7 +206,6 @@ func (s *Service) DeleteRecord(
 		err := s.vaultrecordService.Local.DeleteOnSot(
 			s.context.AuthorizedUser,
 			record.ID,
-			s.context.SelectedSot.ID,
 			&syncChangeID,
 			s.context.SelectedSot.Hostname,
 		)
@@ -222,7 +215,6 @@ func (s *Service) DeleteRecord(
 	} else {
 		err := s.vaultrecordService.Local.DeleteOnReplica(
 			record.ID,
-			s.context.SelectedSot.ID,
 			&syncChangeID,
 		)
 		if err != nil {
@@ -243,17 +235,12 @@ func (s *Service) DeleteRecord(
 func (s *Service) SyncRecord(
 	vault *coreEntity.Vault,
 ) error {
-	lastChangeID, err := s.vaultrecordService.GetSyncLatestChangeId(
-		s.context.SelectedSot.ID,
-		vault.ID,
-	)
+	lastChangeID, err := s.vaultrecordService.Local.GetSyncLatestChangeId()
 	if err != nil {
 		return err
 	}
 
 	localChanges, err := s.getLocalRecordChanges(
-		*s.vaultDir,
-		vault.ID,
 		lastChangeID,
 	)
 	if err != nil {
@@ -279,30 +266,20 @@ func (s *Service) SyncRecord(
 		return err
 	}
 
-	if err := s.vaultrecordService.SyncOnReplica(
-		*s.vaultDir,
-		s.context.SelectedSot.ID,
-		vault.ID,
+	if err := s.vaultrecordService.Local.SyncOnReplica(
 		clientChanges,
 		localChanges,
 	); err != nil {
 		return err
 	}
 
-	return s.vaultrecordService.SetSyncStateToBeLastest(
-		s.context.SelectedSot.ID,
-		vault.ID,
-	)
+	return s.vaultrecordService.Local.SetSyncStateToBeLatest()
 }
 
 func (s *Service) getLocalRecordChanges(
-	vaultDir string,
-	vaultID string,
 	lastChangeID string,
 ) (*contract.PendingVaultRecordChange, error) {
-	changeCount, err := s.vaultrecordService.GetChangeCount(
-		s.context.SelectedSot.ID,
-		vaultID,
+	changeCount, err := s.vaultrecordService.Local.GetChangeCount(
 		lastChangeID,
 	)
 	if err != nil {
@@ -313,10 +290,7 @@ func (s *Service) getLocalRecordChanges(
 		return nil, nil
 	}
 
-	return s.vaultrecordService.GetChangesAfter(
-		vaultDir,
-		vaultID,
-		s.context.SelectedSot.ID,
+	return s.vaultrecordService.Local.GetChangesAfter(
 		lastChangeID,
 		int(changeCount),
 	)
@@ -354,7 +328,7 @@ func (s *Service) getClientRecordChanges(
 
 func (s *Service) SelectVault(
 	vault *coreEntity.Vault,
-	wrappedVaulKey string,
+	wrappedVaultKey string,
 ) error {
 	if vault == nil {
 		return errors.New(
@@ -380,11 +354,20 @@ func (s *Service) SelectVault(
 		)
 	}
 
-	unwrappedVaultKey, err := s.context.SelectedSot.AccessGroup.KeyPair.Open(wrappedVaulKey)
+	unwrappedVaultKey, err := s.context.SelectedSot.AccessGroup.KeyPair.Open(wrappedVaultKey)
 	if err != nil {
+		// debug.LogJSON("context", s.context)
+		fmt.Println("di sini?")
 		return err
 	}
+
 	return s.vaultrecordService.Local.SetConfig(
+		s.appDeps.Config.Path(
+			config.NodeDirName,
+			s.context.SelectedSot.ID,
+			"vault",
+		),
+		s.context.SelectedSot.ID,
 		vault.ID,
 		string(unwrappedVaultKey),
 	)
@@ -428,17 +411,12 @@ func (s *Service) ListRecord(
 		return records, false, nil
 
 	case operationsEntity.SyncModeManual:
-		lastChangeID, err := s.vaultrecordService.GetSyncLatestChangeId(
-			s.context.SelectedSot.ID,
-			vault.ID,
-		)
+		lastChangeID, err := s.vaultrecordService.Local.GetSyncLatestChangeId()
 		if err != nil {
 			return records, false, err
 		}
 
-		totalChanges, err := s.vaultrecordService.GetChangeCount(
-			s.context.SelectedSot.ID,
-			vault.ID,
+		totalChanges, err := s.vaultrecordService.Local.GetChangeCount(
 			lastChangeID,
 		)
 		if err != nil {

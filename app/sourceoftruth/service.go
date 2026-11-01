@@ -317,7 +317,7 @@ func (s *Service) Create(
 	}
 
 	if response.GroupAssignment != nil {
-		privateKeyOfAccessGroup, err := keyPairOfAccessUnit.Open(response.GroupAssignment.WrappedPrivateKey)
+		privateKeyOfAccessGroup, err := keyPairOfAccessUnit.Open(response.GroupAssignment.GroupKeyData.WrappedKey)
 		if err != nil {
 			return "", err
 		}
@@ -325,7 +325,7 @@ func (s *Service) Create(
 		newSot.AccessGroup = &entity.AccessGroup{
 			ID: response.GroupAssignment.ID,
 			KeyPair: *keyring.FromKeys(
-				response.GroupAssignment.PublicKey,
+				response.GroupAssignment.GroupKeyData.PublicKey,
 				string(privateKeyOfAccessGroup),
 			),
 		}
@@ -334,7 +334,11 @@ func (s *Service) Create(
 	sotResult := s.sotFile.Insert(&newSot)
 
 	if response.GroupAssignment != nil {
-		err = s.accessControlService.SyncGroups(sotResult.ID, response.GroupAssignment.Items)
+		err = s.accessControlService.SyncGroups(
+			sotResult.ID,
+			response.GroupAssignment.Items,
+			&response.GroupAssignment.LastSyncChange,
+		)
 		if err != nil {
 			return "", err
 		}
@@ -470,6 +474,8 @@ func (s *Service) List() (
 		},
 	)
 
+	// debug.LogJSON("sot list", sotData)
+
 	return sotData, nil
 }
 
@@ -508,17 +514,41 @@ func (s *Service) Delete(
 		)
 	}
 
-	return s.sotFile.Delete(
+	if err := s.accessControlService.Destroy(sot.ID); err != nil {
+		return err
+	}
+
+	nodeDir := s.appDeps.Config.Path(
+		config.NodeDirName,
+		sot.ID,
+	)
+
+	if err := os.RemoveAll(nodeDir); err != nil {
+		return err
+	}
+
+	if err := s.sotFile.Delete(
 		stored.ID,
-	).Error
+	).Error; err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (s *Service) CheckStatus(
 	sot *entity.SourceOfTruth,
 ) error {
 	accessGroupLastChangeID := ""
-	if sot.AccessGroup != nil {
-		accessGroupLastChangeID = sot.AccessGroup.LastChangeID
+	if sot.Auth.Level.AllowsWrite() {
+		latestSyncChange, err := s.accessControlService.GetLastSyncChange(sot.ID)
+		if err != nil {
+			return err
+		}
+
+		if latestSyncChange != nil {
+			accessGroupLastChangeID = latestSyncChange.ID
+		}
 	}
 
 	authData, err := s.appDeps.Client.GetAuthData(sot.Address, accessGroupLastChangeID)
@@ -550,11 +580,23 @@ func (s *Service) CheckStatus(
 		}
 
 		sot.AccessGroup.ID = authData.GroupAssignment.ID
-		sot.AccessGroup.LastChangeID = authData.GroupAssignment.LastChangeID
+
+		unwrappedGroupPrivateKey, err := sot.Auth.KeyPairOfAccessUnit.Open(
+			authData.GroupAssignment.GroupKeyData.WrappedKey,
+		)
+		if err != nil {
+			return err
+		}
+
+		sot.AccessGroup.KeyPair = *keyring.FromKeys(
+			authData.GroupAssignment.GroupKeyData.PublicKey,
+			string(unwrappedGroupPrivateKey),
+		)
 
 		if err := s.accessControlService.SyncGroups(
 			sot.ID,
 			authData.GroupAssignment.Items,
+			&authData.GroupAssignment.LastSyncChange,
 		); err != nil {
 			return err
 		}

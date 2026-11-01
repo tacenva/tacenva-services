@@ -27,8 +27,6 @@ type SourceOfTruth struct {
 type AccessGroup struct {
 	ID      string          `json:"id"`
 	KeyPair keyring.KeyPair `json:"key_pair"`
-
-	LastChangeID string `json:"last_change_id"`
 }
 
 type Auth struct {

@@ -3,10 +3,10 @@ package vault
 import (
 	"errors"
 
-	"github.com/tacenva/database"
 	"github.com/tacenva/tacenva-services/app"
 	"github.com/tacenva/tacenva-services/app/sourceoftruth"
 
+	"github.com/tacenva/tacenva-core/debug"
 	tacenvaentity "github.com/tacenva/tacenva-core/entity"
 	"github.com/tacenva/tacenva-core/util/keyring"
 	operationsEntity "github.com/tacenva/tacenva-services/entity"
@@ -26,8 +26,6 @@ type Service struct {
 
 	vaultService       *vaultCore.Service
 	vaultrecordService *vaultrecordCore.Service
-
-	vaultDir *string
 }
 
 func NewService(
@@ -186,6 +184,8 @@ func (s *Service) SyncVault() error {
 		return err
 	}
 
+	debug.LogJSON("client changes", clientChanges)
+
 	var appliedOnSot *contract.PendingVaultChange
 	if localChanges != nil {
 		groupIDs := collectUniqueGroupIDs(localChanges.VaultChangeDataList)
@@ -196,30 +196,34 @@ func (s *Service) SyncVault() error {
 		if err != nil {
 			return err
 		}
+		// debug.LogJSON("public keys", publicKeyOfGroups)
 
-		writerGroupKeyPair := keyring.FromKeys(
-			s.context.SelectedSot.AccessGroup.KeyPair.PublicKey,
-			s.context.SelectedSot.AccessGroup.KeyPair.PrivateKey,
-		)
+		writerGroupKeyPair := s.context.SelectedSot.AccessGroup.KeyPair
+		// debug.LogJSON("keypair access group", writerGroupKeyPair)
 
+		// debug.LogJSON("local changes 1", localChanges)
 		for vaultID := range localChanges.VaultChangeDataList {
 			vaultChangeData := localChanges.VaultChangeDataList[vaultID]
-			if len(vaultChangeData.VaultAccessList) == 0 {
+			vault := vaultChangeData.Vault
+			if len(vault.GroupIDs) == 0 {
 				continue
 			}
 
-			vault := vaultChangeData.Vault
 			unwrappedVaultKey, err := writerGroupKeyPair.Open(vault.WrappedKey)
 			if err != nil {
+				// debug.LogJSON("vault sync", vault)
 				return err
 			}
 
 			for _, groupID := range vault.GroupIDs {
 				publicKey := publicKeyOfGroups[groupID]
+				// log.Printf("public key: %s\ngroupID: %s", publicKey, groupID)
 				keyPairOfAccessGroup := keyring.FromPublicKey(publicKey)
+				// debug.LogJSON("key pair of access group", keyPairOfAccessGroup)
 
 				wrappedVaultKey, err := keyPairOfAccessGroup.Seal(unwrappedVaultKey)
 				if err != nil {
+					// log.Printf("Wrapped vault key: %s", wrappedVaultKey)
 					return err
 				}
 				access := tacpassentity.VaultAccess{
@@ -230,8 +234,10 @@ func (s *Service) SyncVault() error {
 				vaultChangeData.VaultAccessList = append(vaultChangeData.VaultAccessList, access)
 			}
 
+			vaultChangeData.Vault.WrappedKey = ""
 			localChanges.VaultChangeDataList[vaultID] = vaultChangeData
 		}
+		// debug.LogJSON("local changes 2", localChanges)
 
 		appliedOnSot, err = s.appDeps.Client.SyncVault(
 			s.context.SelectedSot.Address,
@@ -243,15 +249,13 @@ func (s *Service) SyncVault() error {
 			return err
 		}
 
-		db := database.New(*s.vaultDir)
 		for _, change := range appliedOnSot.SyncChanges {
 			if change.Operation != "create" {
 				continue
 			}
 
 			vaultID := change.EntityID
-
-			recordBlob, err := db.Read(vaultID)
+			recordBlob, err := s.vaultService.Replica.GetRecordBlob(vaultID)
 			if err != nil {
 				return err
 			}
@@ -275,7 +279,7 @@ func (s *Service) SyncVault() error {
 		return err
 	}
 
-	return s.vaultService.SetSyncStateToBeLastest(s.context.SelectedSot.ID)
+	return s.vaultService.SetSyncStateToBeLatest(s.context.SelectedSot.ID)
 }
 
 func (s *Service) CreateVault(
@@ -362,9 +366,7 @@ func (s *Service) UpdateVault(
 	)
 
 	if !s.context.IsRemote {
-		wrappedVaultKey, err := s.GetWrappedVaultKey(
-			vault.ID,
-		)
+		wrappedVaultKey, err := s.GetWrappedVaultKey(vault.ID)
 		if err != nil {
 			return err
 		}

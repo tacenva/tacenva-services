@@ -319,9 +319,9 @@ func (c *Client) PublicKeyOfGroups(
 
 	var publicKeys map[string]string
 
-	if err := c.Post(
+	if err := c.Query(
 		address,
-		"/access-control/groups/public-keys",
+		"/access-groups/public-keys",
 		&tacenvacontract.PublicKeyOfGroupsReq{
 			GroupIDs: normalizedIDs,
 		},
