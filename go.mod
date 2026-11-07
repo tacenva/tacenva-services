@@ -5,8 +5,8 @@ go 1.27.2
 require (
 	github.com/hashicorp/mdns v1.0.7
 	github.com/tacenva/database v1.0.0-alpha.5
-	github.com/tacenva/tacenva-core v1.0.0-alpha.1
-	github.com/tacenva/tacpass-core v1.0.0-alpha.5
+	github.com/tacenva/tacenva-core v1.0.0-alpha.2
+	github.com/tacenva/tacpass-core v1.0.0-alpha.6
 	gorm.io/driver/sqlite v1.6.0
 	gorm.io/gorm v1.31.2
 )
