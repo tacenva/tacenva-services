@@ -51,7 +51,7 @@ func (s *Service) Initialize() (response *tacenvacontract.EnrollResponse, keyPai
 		return nil, nil, nil, err
 	}
 
-	keyPairOfUnit, keyPairOfGroup, err = s.accessControlService.Internal.InitAccess(s.appDeps.Config.SotID)
+	keyPairOfUnit, keyPairOfGroup, err = s.accessControlService.Internal.InitAccess(s.appDeps.Config.SotID, "Tacenva")
 	if err != nil {
 		return nil, nil, nil, err
 	}

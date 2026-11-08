@@ -2,6 +2,7 @@ package accesscontrol
 
 import (
 	"errors"
+	"fmt"
 
 	tacenvaaccesscontrol "github.com/tacenva/tacenva-core/accesscontrol"
 	tacenvacontract "github.com/tacenva/tacenva-core/contract"
@@ -42,38 +43,40 @@ func (s *Service) CreateGroup(
 	newAccessGroup *tacenvaentity.AccessGroup,
 	adminUnit *tacenvaentity.AccessUnit,
 	parentAccess bool,
-) error {
+) (string, error) {
 	keyPairForAccessUnit, err := keyring.GenerateKeyPair()
 	if err != nil {
-		return err
+		return "", err
 	}
+
 	adminUnit.PublicKey = keyPairForAccessUnit.PublicKey
 	adminUnit.SotID = s.selectedGroup.ID
 
 	keyPairForAccessGroup, err := keyring.GenerateKeyPair()
 	if err != nil {
-		return err
+		return "", err
 	}
+
 	newAccessGroup.PublicKey = keyPairForAccessGroup.PublicKey
 
 	wrappedGroupKey, err := keyPairForAccessUnit.Seal(
 		[]byte(keyPairForAccessGroup.PrivateKey),
 	)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	wrappedHierarchyKey := ""
 	if parentAccess {
 		if s.keyPairOfSelectedGroup == nil {
-			return errors.New("Parent group have not selected yet")
+			return "", errors.New("parent group has not been selected yet")
 		}
 
 		wrappedHierarchyKey, err = s.keyPairOfSelectedGroup.Seal(
 			[]byte(keyPairForAccessGroup.PrivateKey),
 		)
 		if err != nil {
-			return err
+			return "", err
 		}
 	}
 
@@ -86,15 +89,27 @@ func (s *Service) CreateGroup(
 	}
 
 	if s.context.IsRemote {
-		return s.appDeps.Client.CreateAccessGroup(
+		err = s.appDeps.Client.CreateAccessGroup(
 			s.context.SelectedSot.Address,
 			&req,
 		)
+	} else {
+		err = s.accesscontrolService.CreateGroup(
+			s.context.AuthorizedUser,
+			&req,
+		)
 	}
-	return s.accesscontrolService.CreateGroup(
-		s.context.AuthorizedUser,
-		&req,
-	)
+
+	if err != nil {
+		return "", err
+	}
+
+	encodedKey, err := keyPairForAccessUnit.EncodedKey()
+	if err != nil {
+		return "", fmt.Errorf("encode access unit secret key: %w", err)
+	}
+
+	return encodedKey, nil
 }
 
 func (s *Service) UpdateGroup(
@@ -146,19 +161,27 @@ func (s *Service) GroupWithChildren(
 
 func (s *Service) CreateUnit(
 	accessUnit *tacenvaentity.AccessUnit,
-) error {
+) (string, error) {
+	if s.keyPairOfSelectedGroup == nil {
+		return "", errors.New("selected group key is not available")
+	}
+
 	keyPairForAccessUnit, err := keyring.GenerateKeyPair()
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	accessUnit.PublicKey = keyPairForAccessUnit.PublicKey
 	accessUnit.GroupID = s.selectedGroup.ID
 	accessUnit.SotID = s.context.SelectedSot.ID
+
 	unwrappedGroupKey := s.keyPairOfSelectedGroup.PrivateKey
-	wrappedGroupKey, err := keyPairForAccessUnit.Seal([]byte(unwrappedGroupKey))
+
+	wrappedGroupKey, err := keyPairForAccessUnit.Seal(
+		[]byte(unwrappedGroupKey),
+	)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	req := tacenvacontract.AccessUnitSetupReq{
@@ -167,15 +190,27 @@ func (s *Service) CreateUnit(
 	}
 
 	if s.context.IsRemote {
-		return s.appDeps.Client.CreateAccessUnit(
+		err = s.appDeps.Client.CreateAccessUnit(
 			s.context.SelectedSot.Address,
 			&req,
 		)
+	} else {
+		err = s.accesscontrolService.CreateUnit(
+			s.context.AuthorizedUser,
+			&req,
+		)
 	}
-	return s.accesscontrolService.CreateUnit(
-		s.context.AuthorizedUser,
-		&req,
-	)
+
+	if err != nil {
+		return "", err
+	}
+
+	encodedKey, err := keyPairForAccessUnit.EncodedKey()
+	if err != nil {
+		return "", fmt.Errorf("encode access unit secret key: %w", err)
+	}
+
+	return encodedKey, nil
 }
 
 func (s *Service) UpdateUnit(
