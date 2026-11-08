@@ -596,6 +596,7 @@ func (s *Service) AllAccessGroup(refresh bool) ([]tacenvaentity.AccessGroup, err
 	}
 
 	return s.vaultService.AllAccessGroup(
+		s.context.SelectedSot.AccessGroup.ID,
 		s.context.SelectedSot.ID,
 	)
 }

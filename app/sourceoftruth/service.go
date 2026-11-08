@@ -46,11 +46,7 @@ func NewService(
 }
 
 func (s *Service) Initialize() (response *tacenvacontract.EnrollResponse, keyPairOfUnit, keyPairOfGroup *keyring.KeyPair, err error) {
-	hostname, err := os.Hostname()
-	if err != nil {
-		return nil, nil, nil, err
-	}
-
+	ReplicaIdentity := s.appDeps.Config.Identity()
 	keyPairOfUnit, keyPairOfGroup, err = s.accessControlService.Internal.InitAccess(s.appDeps.Config.SotID, "Tacenva")
 	if err != nil {
 		return nil, nil, nil, err
@@ -58,8 +54,8 @@ func (s *Service) Initialize() (response *tacenvacontract.EnrollResponse, keyPai
 
 	response, err = s.authService.Enroll(
 		&tacenvacontract.EnrollRequest{
-			Hostname:  hostname,
-			PublicKey: keyPairOfUnit.PublicKey,
+			ReplicaIdentity: ReplicaIdentity,
+			PublicKey:       keyPairOfUnit.PublicKey,
 		},
 		s.appDeps.Config.SotID,
 		tacenvaentity.UserStatusApproved,
@@ -93,9 +89,9 @@ func (s *Service) Access(
 
 		if err := s.sotFile.Insert(
 			&entity.SourceOfTruth{
-				ID:       s.appDeps.Config.SotID,
-				Hostname: result.SotHostname,
-				Address:  "localhost",
+				ID:          s.appDeps.Config.SotID,
+				SotIdentity: result.SotIdentity,
+				Address:     "localhost",
 
 				Auth: &entity.Auth{
 					Token:               result.AuthToken,
@@ -201,19 +197,83 @@ func normalizeAddress(address string) string {
 	return u.String()
 }
 
+func (s *Service) uniqueSotIdentity(identity string) (string, error) {
+	identity = strings.Join(strings.Fields(identity), " ")
+	if identity == "" {
+		return "", errors.New("sot identity cannot be empty")
+	}
+
+	normalized := strings.ToLower(identity)
+
+	var existingSots []entity.SourceOfTruth
+
+	err := s.sotFile.FindWhere(&existingSots, func(m map[string]any) bool {
+		cur, ok := m["SotIdentity"].(string)
+		if !ok {
+			return false
+		}
+
+		cur = strings.ToLower(strings.Join(strings.Fields(cur), " "))
+
+		if cur == normalized {
+			return true
+		}
+
+		prefix := normalized + " ("
+		if !strings.HasPrefix(cur, prefix) || !strings.HasSuffix(cur, ")") {
+			return false
+		}
+
+		suffix := strings.TrimSuffix(strings.TrimPrefix(cur, prefix), ")")
+		n, err := strconv.Atoi(suffix)
+
+		return err == nil && n > 1
+	}).Error
+	if err != nil {
+		return "", err
+	}
+
+	used := make(map[int]struct{})
+	exists := false
+
+	for _, sot := range existingSots {
+		cur := strings.ToLower(strings.Join(strings.Fields(sot.SotIdentity), " "))
+
+		if cur == normalized {
+			exists = true
+			continue
+		}
+
+		prefix := normalized + " ("
+		if !strings.HasPrefix(cur, prefix) || !strings.HasSuffix(cur, ")") {
+			continue
+		}
+
+		suffix := strings.TrimSuffix(strings.TrimPrefix(cur, prefix), ")")
+		if n, err := strconv.Atoi(suffix); err == nil && n > 1 {
+			used[n] = struct{}{}
+		}
+	}
+
+	if !exists {
+		return identity, nil
+	}
+
+	for i := 2; ; i++ {
+		if _, ok := used[i]; !ok {
+			return fmt.Sprintf("%s (%d)", identity, i), nil
+		}
+	}
+}
+
 func (s *Service) Create(
-	hostnameAlias string,
+	identityAlias string,
 	address string,
 	keyPairOfAccessUnit keyring.KeyPair,
 	syncMode entity.SyncMode,
 ) (string, error) {
 	if s.sotFile == nil {
 		return "", ErrForbidden
-	}
-
-	hostname, err := os.Hostname()
-	if err != nil {
-		return "", err
 	}
 
 	address = normalizeAddress(address)
@@ -224,12 +284,8 @@ func (s *Service) Create(
 		address,
 		api.TLSConfig{
 			Fingerprint: "",
-
-			OnFirstTrust: func(
-				newFingerprint string,
-			) error {
+			OnFirstTrust: func(newFingerprint string) error {
 				fingerprint = newFingerprint
-
 				return nil
 			},
 		},
@@ -238,74 +294,29 @@ func (s *Service) Create(
 	response, err := s.appDeps.Client.Enroll(
 		address,
 		tacenvacontract.EnrollRequest{
-			Hostname:  hostname,
-			PublicKey: keyPairOfAccessUnit.PublicKey,
+			ReplicaIdentity: s.appDeps.Config.Identity(),
+			PublicKey:       keyPairOfAccessUnit.PublicKey,
 		},
 	)
 	if err != nil {
 		return "", err
 	}
 
-	sotHostname := response.SotHostname
+	sotIdentity := response.SotIdentity
 
-	if hostnameAlias != "" {
-		sotHostname = hostnameAlias
+	if alias := strings.TrimSpace(identityAlias); alias != "" {
+		sotIdentity = alias
 	}
 
-	baseHostname := sotHostname
-
-	var existingSots []entity.SourceOfTruth
-	err = s.sotFile.FindWhere(&existingSots, func(m map[string]any) bool {
-		hostname, ok := m["Hostname"].(string)
-		if !ok {
-			return false
-		}
-
-		if hostname == baseHostname {
-			return true
-		}
-
-		prefix := baseHostname + "-"
-		if !strings.HasPrefix(hostname, prefix) {
-			return false
-		}
-
-		suffix := strings.TrimPrefix(hostname, prefix)
-		_, err := strconv.Atoi(suffix)
-		return err == nil
-	}).Error
+	sotIdentity, err = s.uniqueSotIdentity(sotIdentity)
 	if err != nil {
 		return "", err
 	}
 
-	used := make(map[int]struct{}, len(existingSots))
-	hostnameExists := false
-
-	for _, sot := range existingSots {
-		if sot.Hostname == baseHostname {
-			hostnameExists = true
-			continue
-		}
-
-		suffix := strings.TrimPrefix(sot.Hostname, baseHostname+"-")
-		if n, err := strconv.Atoi(suffix); err == nil && n > 0 {
-			used[n] = struct{}{}
-		}
-	}
-
-	if hostnameExists {
-		for i := 1; ; i++ {
-			if _, exists := used[i]; !exists {
-				sotHostname = fmt.Sprintf("%s-%d", baseHostname, i)
-				break
-			}
-		}
-	}
-
 	newSot := entity.SourceOfTruth{
-		Hostname: sotHostname,
-		Address:  address,
-		SyncMode: syncMode,
+		SotIdentity: sotIdentity,
+		Address:     address,
+		SyncMode:    syncMode,
 
 		Auth: &entity.Auth{
 			Token:               response.AuthToken,
@@ -317,7 +328,9 @@ func (s *Service) Create(
 	}
 
 	if response.GroupAssignment != nil {
-		privateKeyOfAccessGroup, err := keyPairOfAccessUnit.Open(response.GroupAssignment.GroupKeyData.WrappedKey)
+		privateKeyOfAccessGroup, err := keyPairOfAccessUnit.Open(
+			response.GroupAssignment.GroupKeyData.WrappedKey,
+		)
 		if err != nil {
 			return "", err
 		}
@@ -467,9 +480,9 @@ func (s *Service) List() (
 			}
 
 			return strings.ToLower(
-				sotData[i].Hostname,
+				sotData[i].SotIdentity,
 			) < strings.ToLower(
-				sotData[j].Hostname,
+				sotData[j].SotIdentity,
 			)
 		},
 	)
