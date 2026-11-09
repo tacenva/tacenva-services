@@ -3,6 +3,7 @@ package sourceoftruth
 import (
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"net/url"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"github.com/tacenva/tacenva-core/auth"
 	"github.com/tacenva/tacenva-core/config"
 	tacenvacontract "github.com/tacenva/tacenva-core/contract"
+	"github.com/tacenva/tacenva-core/debug"
 	tacenvaentity "github.com/tacenva/tacenva-core/entity"
 	"github.com/tacenva/tacenva-core/util/keyring"
 	"github.com/tacenva/tacenva-services/api"
@@ -102,7 +104,7 @@ func (s *Service) Access(
 
 				AccessGroup: &entity.AccessGroup{
 					ID:      result.GroupAssignment.ID,
-					KeyPair: *keyPairOfGroup,
+					KeyPair: keyPairOfGroup,
 				},
 			},
 		).Error; err != nil {
@@ -208,7 +210,7 @@ func (s *Service) uniqueSotIdentity(identity string) (string, error) {
 	var existingSots []entity.SourceOfTruth
 
 	err := s.sotFile.FindWhere(&existingSots, func(m map[string]any) bool {
-		cur, ok := m["SotIdentity"].(string)
+		cur, ok := m["sot_identity"].(string)
 		if !ok {
 			return false
 		}
@@ -227,20 +229,21 @@ func (s *Service) uniqueSotIdentity(identity string) (string, error) {
 		suffix := strings.TrimSuffix(strings.TrimPrefix(cur, prefix), ")")
 		n, err := strconv.Atoi(suffix)
 
-		return err == nil && n > 1
+		return err == nil && n >= 2
 	}).Error
 	if err != nil {
 		return "", err
 	}
 
-	used := make(map[int]struct{})
-	exists := false
+	maxSuffix := 0
 
 	for _, sot := range existingSots {
-		cur := strings.ToLower(strings.Join(strings.Fields(sot.SotIdentity), " "))
+		cur := strings.ToLower(strings.Join(
+			strings.Fields(sot.SotIdentity), " ",
+		))
 
 		if cur == normalized {
-			exists = true
+			maxSuffix = max(maxSuffix, 1)
 			continue
 		}
 
@@ -250,20 +253,17 @@ func (s *Service) uniqueSotIdentity(identity string) (string, error) {
 		}
 
 		suffix := strings.TrimSuffix(strings.TrimPrefix(cur, prefix), ")")
-		if n, err := strconv.Atoi(suffix); err == nil && n > 1 {
-			used[n] = struct{}{}
+		n, err := strconv.Atoi(suffix)
+		if err == nil && n >= 2 {
+			maxSuffix = max(maxSuffix, n)
 		}
 	}
 
-	if !exists {
+	if maxSuffix == 0 {
 		return identity, nil
 	}
 
-	for i := 2; ; i++ {
-		if _, ok := used[i]; !ok {
-			return fmt.Sprintf("%s (%d)", identity, i), nil
-		}
-	}
+	return fmt.Sprintf("%s (%d)", identity, maxSuffix+1), nil
 }
 
 func (s *Service) Create(
@@ -328,6 +328,8 @@ func (s *Service) Create(
 	}
 
 	if response.GroupAssignment != nil {
+		var keyPairOfAccessGroup *keyring.KeyPair
+
 		privateKeyOfAccessGroup, err := keyPairOfAccessUnit.Open(
 			response.GroupAssignment.GroupKeyData.WrappedKey,
 		)
@@ -335,22 +337,26 @@ func (s *Service) Create(
 			return "", err
 		}
 
+		keyPairOfAccessGroup = keyring.FromKeys(
+			response.GroupAssignment.GroupKeyData.PublicKey,
+			string(privateKeyOfAccessGroup),
+		)
+
 		newSot.AccessGroup = &entity.AccessGroup{
-			ID: response.GroupAssignment.ID,
-			KeyPair: *keyring.FromKeys(
-				response.GroupAssignment.GroupKeyData.PublicKey,
-				string(privateKeyOfAccessGroup),
-			),
+			ID:      response.GroupAssignment.ID,
+			KeyPair: keyPairOfAccessGroup,
 		}
 	}
 
 	sotResult := s.sotFile.Insert(&newSot)
 
+	// debug.LogJSON("sot result", sotResult)
+
 	if response.GroupAssignment != nil {
 		err = s.accessControlService.SyncGroups(
 			sotResult.ID,
 			response.GroupAssignment.Items,
-			&response.GroupAssignment.LastSyncChange,
+			response.GroupAssignment.LastSyncChange,
 		)
 		if err != nil {
 			return "", err
@@ -581,9 +587,6 @@ func (s *Service) CheckStatus(
 		changed = true
 	}
 
-	// debug.LogJSON("authdata", authData)
-	// debug.LogJSON("sot", sot)
-
 	if authData.GroupAssignment != nil &&
 		(sot.AccessGroup == nil ||
 			sot.AccessGroup.ID != authData.GroupAssignment.ID) {
@@ -597,11 +600,13 @@ func (s *Service) CheckStatus(
 		unwrappedGroupPrivateKey, err := sot.Auth.KeyPairOfAccessUnit.Open(
 			authData.GroupAssignment.GroupKeyData.WrappedKey,
 		)
+		debug.LogJSON("auth data", authData)
 		if err != nil {
+			log.Println(err)
 			return err
 		}
 
-		sot.AccessGroup.KeyPair = *keyring.FromKeys(
+		sot.AccessGroup.KeyPair = keyring.FromKeys(
 			authData.GroupAssignment.GroupKeyData.PublicKey,
 			string(unwrappedGroupPrivateKey),
 		)
@@ -609,7 +614,7 @@ func (s *Service) CheckStatus(
 		if err := s.accessControlService.SyncGroups(
 			sot.ID,
 			authData.GroupAssignment.Items,
-			&authData.GroupAssignment.LastSyncChange,
+			authData.GroupAssignment.LastSyncChange,
 		); err != nil {
 			return err
 		}

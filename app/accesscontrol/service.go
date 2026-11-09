@@ -7,6 +7,7 @@ import (
 	tacenvaaccesscontrol "github.com/tacenva/tacenva-core/accesscontrol"
 	tacenvacontract "github.com/tacenva/tacenva-core/contract"
 	tacenvaentity "github.com/tacenva/tacenva-core/entity"
+	"github.com/tacenva/tacenva-core/genericerror"
 	"github.com/tacenva/tacenva-core/util/keyring"
 
 	"github.com/tacenva/tacenva-services/app"
@@ -34,9 +35,28 @@ func NewService(
 	}
 }
 
-func (s *Service) SetSelectedGroup(selectedGroup *tacenvaentity.AccessGroup) {
+func (s *Service) KeyPairOfChild(
+	publicKeyOfChild, wrappedPrivateKeyOfChild string,
+) (*keyring.KeyPair, error) {
+	if s.selectedGroup == nil || s.keyPairOfSelectedGroup == nil {
+		return nil, genericerror.ErrEmptyValue
+	}
+
+	if wrappedPrivateKeyOfChild == "" {
+		return nil, nil
+	}
+
+	privateKeyOfChild, err := s.keyPairOfSelectedGroup.Open(wrappedPrivateKeyOfChild)
+	if err != nil {
+		return nil, err
+	}
+
+	return keyring.FromKeys(publicKeyOfChild, string(privateKeyOfChild)), nil
+}
+
+func (s *Service) SetSelectedGroup(selectedGroup *tacenvaentity.AccessGroup, keyPairOfSelectedGroup *keyring.KeyPair) {
 	s.selectedGroup = selectedGroup
-	s.keyPairOfSelectedGroup = keyring.FromPublicKey(selectedGroup.PublicKey)
+	s.keyPairOfSelectedGroup = keyPairOfSelectedGroup
 }
 
 func (s *Service) CreateGroup(
@@ -44,10 +64,16 @@ func (s *Service) CreateGroup(
 	adminUnit *tacenvaentity.AccessUnit,
 	parentAccess bool,
 ) (string, error) {
+	if s.keyPairOfSelectedGroup == nil {
+		return "", errors.New("cannot perform this action: unaccessible group")
+	}
+
 	keyPairForAccessUnit, err := keyring.GenerateKeyPair()
 	if err != nil {
 		return "", err
 	}
+
+	// debug.LogJSON("keypair for access unit", keyPairForAccessUnit)
 
 	adminUnit.PublicKey = keyPairForAccessUnit.PublicKey
 	adminUnit.SotID = s.selectedGroup.ID
@@ -57,6 +83,7 @@ func (s *Service) CreateGroup(
 		return "", err
 	}
 
+	// debug.LogJSON("keypair for access group", keyPairForAccessGroup)
 	newAccessGroup.PublicKey = keyPairForAccessGroup.PublicKey
 
 	wrappedGroupKey, err := keyPairForAccessUnit.Seal(
@@ -163,7 +190,7 @@ func (s *Service) CreateUnit(
 	accessUnit *tacenvaentity.AccessUnit,
 ) (string, error) {
 	if s.keyPairOfSelectedGroup == nil {
-		return "", errors.New("selected group key is not available")
+		return "", errors.New("cannot perform this action: unaccessible group")
 	}
 
 	keyPairForAccessUnit, err := keyring.GenerateKeyPair()
@@ -216,6 +243,10 @@ func (s *Service) CreateUnit(
 func (s *Service) UpdateUnit(
 	accessUnit *tacenvaentity.AccessUnit,
 ) error {
+	if s.keyPairOfSelectedGroup == nil {
+		return errors.New("cannot perform this action: unaccessible group")
+	}
+
 	if s.context.IsRemote {
 		return s.appDeps.Client.UpdateAccessUnit(
 			s.context.SelectedSot.Address,
@@ -248,6 +279,10 @@ func (s *Service) SetRevokeUnit(
 	unitID string,
 	isRevoked bool,
 ) error {
+	if s.keyPairOfSelectedGroup == nil {
+		return errors.New("cannot perform this action: unaccessible group")
+	}
+
 	if s.context.IsRemote {
 		return s.appDeps.Client.SetRevokeAccessUnit(
 			s.context.SelectedSot.Address,

@@ -7,6 +7,7 @@ import (
 	"github.com/tacenva/tacenva-services/app"
 	"github.com/tacenva/tacenva-services/app/sourceoftruth"
 
+	"github.com/tacenva/tacenva-core/debug"
 	tacenvaentity "github.com/tacenva/tacenva-core/entity"
 	"github.com/tacenva/tacenva-core/util/keyring"
 	operationsEntity "github.com/tacenva/tacenva-services/entity"
@@ -43,10 +44,104 @@ func NewService(
 	}
 }
 
-func (s *Service) getLocalVaultChanges(
+func (s *Service) List() ([]tacpassentity.Vault, bool, error) {
+	var (
+		vaultList []tacpassentity.Vault
+		err       error
+	)
+
+	if !s.context.IsRemote {
+		vaultList, err = s.vaultService.Sot.List(
+			s.context.AuthorizedUser,
+		)
+		if err != nil {
+			return nil, false, err
+		}
+
+		return vaultList, false, nil
+	}
+
+	// debug.LogJSON("selected sot", s.context.SelectedSot)
+
+	vaultList, err = s.vaultService.Replica.List(
+		s.context.SelectedSot.AccessGroup.ID,
+	)
+	if err != nil {
+		return nil, false, err
+	}
+
+	if !s.appDeps.Client.IsReachable() {
+		return vaultList, false, nil
+	}
+
+	switch s.context.SelectedSot.SyncMode {
+	case operationsEntity.SyncModeAuto:
+		err = s.SyncVault()
+
+		return vaultList, err != nil, err
+
+	case operationsEntity.SyncModeManual:
+		lastChangeID, err := s.vaultService.GetSyncLatestChangeID(
+			s.context.SelectedSot.ID,
+		)
+		if err != nil {
+			return vaultList, false, err
+		}
+
+		replicaTotalChanges, err := s.vaultService.Replica.GetChangeCount(
+			s.context.SelectedSot.ID,
+			lastChangeID,
+		)
+		if err != nil {
+			return vaultList, false, err
+		}
+
+		if replicaTotalChanges == nil {
+			return vaultList, false, fmt.Errorf(
+				"replica change count is nil",
+			)
+		}
+
+		sotChangeCount, err := s.appDeps.Client.GetVaultChangesCount(
+			s.context.SelectedSot.Address,
+			lastChangeID,
+		)
+		if err != nil {
+			return vaultList, false, err
+		}
+
+		needSync := (replicaTotalChanges.Count + sotChangeCount.Count) > 0
+
+		return vaultList, needSync, nil
+
+	default:
+		return nil, false, nil
+	}
+}
+
+func collectUniqueGroupIDs(changeDataList map[string]contract.VaultChangeData) []string {
+	groupIDSet := make(map[string]struct{})
+
+	for vaultID := range changeDataList {
+		groupIDs := changeDataList[vaultID].Vault.GroupIDs
+		for _, groupID := range groupIDs {
+			groupIDSet[groupID] = struct{}{}
+
+		}
+	}
+
+	groupIDs := make([]string, 0, len(groupIDSet))
+	for groupID := range groupIDSet {
+		groupIDs = append(groupIDs, groupID)
+	}
+
+	return groupIDs
+}
+
+func (s *Service) getReplicaVaultChanges(
 	lastChangeID string,
 ) (*contract.PendingVaultChange, error) {
-	pendingCount, err := s.vaultService.GetChangeCount(
+	pendingCount, err := s.vaultService.Replica.GetChangeCount(
 		s.context.SelectedSot.ID,
 		lastChangeID,
 	)
@@ -61,11 +156,11 @@ func (s *Service) getLocalVaultChanges(
 	return s.vaultService.Replica.GetChangesAfter(
 		s.context.SelectedSot.ID,
 		lastChangeID,
-		int(pendingCount.Count),
+		pendingCount.Count,
 	)
 }
 
-func (s *Service) getClientVaultChanges(
+func (s *Service) getSotVaultChanges(
 	lastChangeID string,
 ) (*contract.PendingVaultChange, *contract.PendingTotalChanges, error) {
 	changeCount, err := s.appDeps.Client.GetVaultChangesCount(
@@ -92,198 +187,6 @@ func (s *Service) getClientVaultChanges(
 	return pendingChanges, changeCount, nil
 }
 
-func (s *Service) List() ([]tacpassentity.Vault, bool, error) {
-	// start := time.Now()
-
-	// log.Printf(
-	// 	"[VaultService.List] started: is_remote=%t",
-	// 	s.context.IsRemote,
-	// )
-
-	var (
-		vaultList []tacpassentity.Vault
-		err       error
-	)
-
-	if !s.context.IsRemote {
-		// log.Printf("[VaultService.List] listing local SOT vaults")
-
-		vaultList, err = s.vaultService.Sot.List(
-			s.context.AuthorizedUser,
-		)
-		if err != nil {
-			// log.Printf(
-			// 	"[VaultService.List] local SOT list failed: error=%v",
-			// 	err,
-			// )
-			return nil, false, err
-		}
-
-		// log.Printf(
-		// 	"[VaultService.List] local SOT list completed: vaults=%d, duration=%s",
-		// 	len(vaultList),
-		// 	time.Since(start),
-		// )
-
-		return vaultList, false, nil
-	}
-
-	// log.Printf(
-	// 	"[VaultService.List] listing replica vaults: access_group_id=%s",
-	// 	s.context.SelectedSot.AccessGroup.ID,
-	// )
-
-	vaultList, err = s.vaultService.Replica.List(
-		s.context.SelectedSot.AccessGroup.ID,
-	)
-	if err != nil {
-		// log.Printf(
-		// 	"[VaultService.List] replica list failed: error=%v",
-		// 	err,
-		// )
-		return nil, false, err
-	}
-
-	// log.Printf(
-	// 	"[VaultService.List] replica list completed: vaults=%d",
-	// 	len(vaultList),
-	// )
-
-	// for i, vault := range vaultList {
-	// 	log.Printf(
-	// 		"[VaultService.List] vault[%d]: id=%s, name=%s",
-	// 		i,
-	// 		vault.ID,
-	// 		vault.Name,
-	// 	)
-	// }
-
-	if !s.appDeps.Client.IsReachable() {
-		// log.Printf(
-		// 	"[VaultService.List] offline: returning replica data, duration=%s",
-		// 	time.Since(start),
-		// )
-		return vaultList, false, nil
-	}
-
-	switch s.context.SelectedSot.SyncMode {
-	case operationsEntity.SyncModeAuto:
-		// log.Printf("[VaultService.List] auto sync started")
-
-		err = s.SyncVault()
-
-		// log.Printf(
-		// 	"[VaultService.List] auto sync completed: success=%t, error=%v, duration=%s",
-		// 	err == nil,
-		// 	err,
-		// 	time.Since(start),
-		// )
-
-		return vaultList, err != nil, err
-
-	case operationsEntity.SyncModeManual:
-		// log.Printf("[VaultService.List] manual sync check started")
-
-		lastChangeID, err := s.vaultService.GetSyncLatestChangeID(
-			s.context.SelectedSot.ID,
-		)
-		if err != nil {
-			// log.Printf(
-			// 	"[VaultService.List] get latest change ID failed: error=%v",
-			// 	err,
-			// )
-			return vaultList, false, err
-		}
-
-		// log.Printf(
-		// 	"[VaultService.List] latest change ID: %s",
-		// 	lastChangeID,
-		// )
-
-		totalChanges, err := s.vaultService.GetChangeCount(
-			s.context.SelectedSot.ID,
-			lastChangeID,
-		)
-		if err != nil {
-			// log.Printf(
-			// 	"[VaultService.List] get local change count failed: error=%v",
-			// 	err,
-			// )
-			return vaultList, false, err
-		}
-
-		if totalChanges == nil {
-			// log.Printf(
-			// 	"[VaultService.List] local change count is nil",
-			// )
-			return vaultList, false, fmt.Errorf(
-				"local change count is nil",
-			)
-		}
-
-		// log.Printf(
-		// 	"[VaultService.List] local changes: %d",
-		// 	totalChanges.Count,
-		// )
-
-		clientChangeCount, err := s.appDeps.Client.GetVaultChangesCount(
-			s.context.SelectedSot.Address,
-			lastChangeID,
-		)
-		if err != nil {
-			// log.Printf(
-			// 	"[VaultService.List] get remote change count failed: error=%v",
-			// 	err,
-			// )
-			return vaultList, false, err
-		}
-
-		// log.Printf(
-		// 	"[VaultService.List] remote changes: %d",
-		// 	clientChangeCount.Count,
-		// )
-
-		totalChanges.Count += clientChangeCount.Count
-
-		needSync := totalChanges.Count > 0
-
-		// log.Printf(
-		// 	"[VaultService.List] manual sync check completed: total_changes=%d, need_sync=%t, duration=%s",
-		// 	totalChanges.Count,
-		// 	needSync,
-		// 	time.Since(start),
-		// )
-
-		return vaultList, needSync, nil
-
-	default:
-		// log.Printf(
-		// 	"[VaultService.List] unsupported sync mode: %v",
-		// 	s.context.SelectedSot.SyncMode,
-		// )
-		return nil, false, nil
-	}
-}
-
-func collectUniqueGroupIDs(changeDataList map[string]contract.VaultChangeData) []string {
-	groupIDSet := make(map[string]struct{})
-
-	for vaultID := range changeDataList {
-		groupIDs := changeDataList[vaultID].Vault.GroupIDs
-		for _, groupID := range groupIDs {
-			groupIDSet[groupID] = struct{}{}
-
-		}
-	}
-
-	groupIDs := make([]string, 0, len(groupIDSet))
-	for groupID := range groupIDSet {
-		groupIDs = append(groupIDs, groupID)
-	}
-
-	return groupIDs
-}
-
 func (s *Service) SyncVault() error {
 	if !s.context.IsRemote {
 		return nil
@@ -294,22 +197,19 @@ func (s *Service) SyncVault() error {
 		return err
 	}
 
-	localChanges, err := s.getLocalVaultChanges(lastChangeID)
+	replicaChanges, err := s.getReplicaVaultChanges(lastChangeID)
 	if err != nil {
 		return err
 	}
 
-	clientChanges, clientChangeTotal, err := s.getClientVaultChanges(lastChangeID)
+	sotChanges, sotChangeTotal, err := s.getSotVaultChanges(lastChangeID)
 	if err != nil {
 		return err
 	}
-
-	// debug.LogJSON("local changes", localChanges)
-	// debug.LogJSON("client changes", clientChanges)
 
 	var appliedOnSot *contract.PendingVaultChange
-	if localChanges != nil {
-		groupIDs := collectUniqueGroupIDs(localChanges.VaultChangeDataList)
+	if replicaChanges != nil {
+		groupIDs := collectUniqueGroupIDs(replicaChanges.VaultChangeDataList)
 		publicKeyOfGroups, err := s.appDeps.Client.PublicKeyOfGroups(
 			s.context.SelectedSot.Address,
 			groupIDs,
@@ -317,14 +217,9 @@ func (s *Service) SyncVault() error {
 		if err != nil {
 			return err
 		}
-		// debug.LogJSON("public keys", publicKeyOfGroups)
-
 		writerGroupKeyPair := s.context.SelectedSot.AccessGroup.KeyPair
-		// debug.LogJSON("keypair access group", writerGroupKeyPair)
-
-		// debug.LogJSON("local changes 1", localChanges)
-		for vaultID := range localChanges.VaultChangeDataList {
-			vaultChangeData := localChanges.VaultChangeDataList[vaultID]
+		for vaultID := range replicaChanges.VaultChangeDataList {
+			vaultChangeData := replicaChanges.VaultChangeDataList[vaultID]
 			vault := vaultChangeData.Vault
 			if len(vault.GroupIDs) == 0 {
 				continue
@@ -332,19 +227,15 @@ func (s *Service) SyncVault() error {
 
 			unwrappedVaultKey, err := writerGroupKeyPair.Open(vault.WrappedKey)
 			if err != nil {
-				// debug.LogJSON("vault sync", vault)
 				return err
 			}
 
 			for _, groupID := range vault.GroupIDs {
 				publicKey := publicKeyOfGroups[groupID]
-				// log.Printf("public key: %s\ngroupID: %s", publicKey, groupID)
 				keyPairOfAccessGroup := keyring.FromPublicKey(publicKey)
-				// debug.LogJSON("key pair of access group", keyPairOfAccessGroup)
 
 				wrappedVaultKey, err := keyPairOfAccessGroup.Seal(unwrappedVaultKey)
 				if err != nil {
-					// log.Printf("Wrapped vault key: %s", wrappedVaultKey)
 					return err
 				}
 				access := tacpassentity.VaultAccess{
@@ -356,22 +247,23 @@ func (s *Service) SyncVault() error {
 			}
 
 			vaultChangeData.Vault.WrappedKey = ""
-			localChanges.VaultChangeDataList[vaultID] = vaultChangeData
+			replicaChanges.VaultChangeDataList[vaultID] = vaultChangeData
 		}
-		// debug.LogJSON("local changes 2", localChanges)
 
 		appliedOnSot, err = s.appDeps.Client.SyncVault(
 			s.context.SelectedSot.Address,
 			lastChangeID,
-			int(clientChangeTotal.Count),
-			localChanges,
+			int(sotChangeTotal.Count),
+			replicaChanges,
 		)
 		if err != nil {
 			return err
 		}
 
+		// debug.LogJSON("applied on sot", appliedOnSot)
+
 		for _, change := range appliedOnSot.SyncChanges {
-			if change.Operation != "create" {
+			if change.Operation != tacenvaentity.OperationCreate {
 				continue
 			}
 
@@ -394,8 +286,8 @@ func (s *Service) SyncVault() error {
 	if err := s.vaultService.Replica.Sync(
 		s.context.SelectedSot.ID,
 		s.context.SelectedSot.AccessGroup.ID,
-		localChanges,
-		clientChanges,
+		replicaChanges,
+		sotChanges,
 	); err != nil {
 		return err
 	}
@@ -444,7 +336,7 @@ func (s *Service) CreateVault(
 		},
 		s.context.SelectedSot.ID,
 		&syncChangeID,
-		&s.context.SelectedSot.AccessGroup.KeyPair,
+		s.context.SelectedSot.AccessGroup.KeyPair,
 	)
 	if err != nil {
 		return err
@@ -591,12 +483,34 @@ func (s *Service) GetWrappedVaultKey(
 }
 
 func (s *Service) AllAccessGroup(refresh bool) ([]tacenvaentity.AccessGroup, error) {
-	if refresh && s.context.IsRemote {
-		//
-	}
-
-	return s.vaultService.AllAccessGroup(
-		s.context.SelectedSot.AccessGroup.ID,
+	currentGroup, err := s.vaultService.AllAccessGroup(
 		s.context.SelectedSot.ID,
 	)
+	if err != nil {
+		return nil, err
+	}
+
+	if refresh && s.context.IsRemote {
+		groups, err := s.appDeps.Client.GetAllAccessGroup(
+			s.context.SelectedSot.Address,
+		)
+		if err != nil {
+			return currentGroup, err
+		}
+
+		debug.LogJSON("updated group", groups)
+
+		err = s.vaultService.SyncGroups(
+			s.context.SelectedSot.ID,
+			groups,
+			nil,
+		)
+		if err != nil {
+			return currentGroup, err
+		}
+
+		currentGroup = groups
+	}
+
+	return currentGroup, nil
 }

@@ -2,6 +2,7 @@ package vault
 
 import (
 	"errors"
+	"time"
 
 	"github.com/tacenva/database"
 	"github.com/tacenva/tacenva-core/config"
@@ -40,6 +41,14 @@ func (s *Service) AppendRecord(
 		return nil, errors.New(
 			"selected source of truth is nil",
 		)
+	}
+
+	if record.RenewalPeriod < 0 {
+		return nil, errors.New(
+			"vault renewal period cannot be negative",
+		)
+	} else if record.RenewalPeriod > 0 {
+		record.LastRenewedAt = time.Now()
 	}
 
 	encrypted, err := s.vaultrecordService.Local.SimulateEncryption(record)
@@ -121,6 +130,31 @@ func (s *Service) UpdateRecord(
 		return nil, errors.New(
 			"selected source of truth is nil",
 		)
+	}
+
+	if record.RenewalPeriod < 0 {
+		return nil, errors.New("vault renewal period cannot be negative")
+	}
+
+	existingRecord, err := s.vaultrecordService.Local.Find(record.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Preserve the existing renewal timestamp.
+	record.LastRenewedAt = existingRecord.LastRenewedAt
+
+	now := time.Now()
+
+	// Reset the renewal timestamp when the renewal period changes.
+	if existingRecord.RenewalPeriod != record.RenewalPeriod &&
+		record.RenewalPeriod > 0 {
+		record.LastRenewedAt = now
+	}
+
+	// Reset the renewal timestamp when the password changes.
+	if existingRecord.Password != record.Password {
+		record.LastRenewedAt = now
 	}
 
 	encrypted, err := s.vaultrecordService.Local.SimulateEncryption(record)
@@ -353,7 +387,7 @@ func (s *Service) getLocalRecordChanges(
 
 	return s.vaultrecordService.Local.GetChangesAfter(
 		lastChangeID,
-		int(changeCount),
+		changeCount,
 	)
 }
 

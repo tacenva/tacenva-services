@@ -18,6 +18,7 @@ type Deps struct {
 
 	ServerService *server.Service
 }
+
 type Context struct {
 	SelectedSot    *operationentity.SourceOfTruth
 	AuthorizedUser *tacenvaentity.User

@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	tacenvaentity "github.com/tacenva/tacenva-core/entity"
 	tacpasscontract "github.com/tacenva/tacpass-core/contract"
 )
 
@@ -339,4 +340,23 @@ func (c *Client) doRaw(
 	}
 
 	return body, nil
+}
+
+func (c *Client) GetAllAccessGroup(
+	address string,
+) ([]tacenvaentity.AccessGroup, error) {
+	var accessGroups []tacenvaentity.AccessGroup
+
+	if err := c.Get(
+		address,
+		"/vault/access-groups",
+		&accessGroups,
+	); err != nil {
+		return nil, fmt.Errorf(
+			"vault: %w",
+			err,
+		)
+	}
+
+	return accessGroups, nil
 }

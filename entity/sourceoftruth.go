@@ -25,8 +25,8 @@ type SourceOfTruth struct {
 }
 
 type AccessGroup struct {
-	ID      string          `json:"id"`
-	KeyPair keyring.KeyPair `json:"key_pair"`
+	ID      string           `json:"id"`
+	KeyPair *keyring.KeyPair `json:"key_pair"`
 }
 
 type Auth struct {
