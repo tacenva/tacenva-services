@@ -101,26 +101,28 @@ func (c *Client) AccessGroupWithChildren(
 func (c *Client) CreateAccessUnit(
 	address string,
 	req *tacenvacontract.AccessUnitSetupReq,
-) error {
-	groupID := strings.TrimSpace(req.AccessUnit.GroupID)
+) (*tacenvaentity.AccessUnit, error) {
+	if req == nil || req.AccessUnit == nil {
+		return nil, fmt.Errorf("access unit request is required")
+	}
 
+	groupID := strings.TrimSpace(req.AccessUnit.GroupID)
 	if groupID == "" {
-		return fmt.Errorf("access group id is required")
+		return nil, fmt.Errorf("access group id is required")
 	}
-	if req == nil {
-		return fmt.Errorf("access unit request is required")
-	}
+
+	var createdUnit tacenvaentity.AccessUnit
 
 	if err := c.Post(
 		address,
 		"/access-control/groups/"+url.PathEscape(groupID)+"/units",
 		req,
-		nil,
+		&createdUnit,
 	); err != nil {
-		return fmt.Errorf("create access unit: %w", err)
+		return nil, fmt.Errorf("create access unit: %w", err)
 	}
 
-	return nil
+	return &createdUnit, nil
 }
 
 func (c *Client) UpdateAccessUnit(

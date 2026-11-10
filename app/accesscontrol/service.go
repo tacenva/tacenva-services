@@ -185,29 +185,45 @@ func (s *Service) GroupWithChildren(
 	return s.accesscontrolService.GroupWithChildren(s.context.AuthorizedUser, selectedGroupID)
 }
 
+type CreateUnitResult struct {
+	AccessUnit *tacenvaentity.AccessUnit
+	EncodedKey string
+}
+
 func (s *Service) CreateUnit(
 	accessUnit *tacenvaentity.AccessUnit,
-) (string, error) {
+) (*CreateUnitResult, error) {
+	if accessUnit == nil {
+		return nil, errors.New("access unit is required")
+	}
+
 	if s.keyPairOfSelectedGroup == nil {
-		return "", errors.New("cannot perform this action: unaccessible group")
+		return nil, errors.New("cannot perform this action: unaccessible group")
+	}
+
+	if s.selectedGroup == nil {
+		return nil, errors.New("access group has not been selected")
 	}
 
 	keyPairForAccessUnit, err := keyring.GenerateKeyPair()
 	if err != nil {
-		return "", err
+		return nil, err
+	}
+
+	encodedKey, err := keyPairForAccessUnit.EncodedKey()
+	if err != nil {
+		return nil, fmt.Errorf("encode access unit secret key: %w", err)
 	}
 
 	accessUnit.PublicKey = keyPairForAccessUnit.PublicKey
 	accessUnit.GroupID = s.selectedGroup.ID
 	accessUnit.SotID = s.context.SelectedSot.ID
 
-	unwrappedGroupKey := s.keyPairOfSelectedGroup.PrivateKey
-
 	wrappedGroupKey, err := keyPairForAccessUnit.Seal(
-		[]byte(unwrappedGroupKey),
+		[]byte(s.keyPairOfSelectedGroup.PrivateKey),
 	)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	req := tacenvacontract.AccessUnitSetupReq{
@@ -215,28 +231,32 @@ func (s *Service) CreateUnit(
 		WrappedGroupKey: wrappedGroupKey,
 	}
 
+	var createdUnit *tacenvaentity.AccessUnit
+
 	if s.context.IsRemote {
-		err = s.appDeps.Client.CreateAccessUnit(
+		createdUnit, err = s.appDeps.Client.CreateAccessUnit(
 			s.context.SelectedSot.Address,
 			&req,
 		)
 	} else {
-		err = s.accesscontrolService.CreateUnit(
+		createdUnit, err = s.accesscontrolService.CreateUnit(
 			s.context.AuthorizedUser,
 			&req,
 		)
 	}
 
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
-	encodedKey, err := keyPairForAccessUnit.EncodedKey()
-	if err != nil {
-		return "", fmt.Errorf("encode access unit secret key: %w", err)
+	if createdUnit == nil || createdUnit.ID == "" {
+		return nil, errors.New("created access unit has no ID")
 	}
 
-	return encodedKey, nil
+	return &CreateUnitResult{
+		AccessUnit: createdUnit,
+		EncodedKey: encodedKey,
+	}, nil
 }
 
 func (s *Service) UpdateUnit(
