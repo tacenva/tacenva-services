@@ -171,11 +171,10 @@ func (s *Service) DeleteGroup(
 }
 
 func (s *Service) GroupWithChildren(
-	selectedGroup *tacenvaentity.AccessGroup,
+	selectedGroupID string,
 ) ([]tacenvacontract.AccessGroupTree, error) {
-	selectedGroupID := ""
-	if selectedGroup != nil {
-		selectedGroupID = selectedGroup.ID
+	if selectedGroupID == "" {
+		return nil, errors.New("cannot perform this action: group is not selected yet")
 	}
 	if s.context.IsRemote {
 		return s.appDeps.Client.AccessGroupWithChildren(

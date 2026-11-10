@@ -102,27 +102,7 @@ func (c *Client) CreateAccessUnit(
 	address string,
 	req *tacenvacontract.AccessUnitSetupReq,
 ) error {
-	if req == nil {
-		return fmt.Errorf("access unit request is required")
-	}
-
-	// Endpoint ini mengikuti router:
-	// POST /access-control/groups/{id}/units
-	//
-	// Pastikan ID group tersedia pada request atau gunakan
-	// method di bawah yang menerima groupID secara eksplisit.
-
-	return fmt.Errorf(
-		"create access unit requires groupID; use CreateAccessUnitInGroup",
-	)
-}
-
-func (c *Client) CreateAccessUnitInGroup(
-	address string,
-	groupID string,
-	req *tacenvacontract.AccessUnitSetupReq,
-) error {
-	groupID = strings.TrimSpace(groupID)
+	groupID := strings.TrimSpace(req.AccessUnit.GroupID)
 
 	if groupID == "" {
 		return fmt.Errorf("access group id is required")
