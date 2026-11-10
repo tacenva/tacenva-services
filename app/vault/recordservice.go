@@ -559,7 +559,9 @@ func (s *Service) ListRecord(
 		return withError(nil, false)
 	}
 
-	if !s.appDeps.Client.IsReachable() {
+	if !s.appDeps.Client.IsReachable(
+		s.context.SelectedSot.Address,
+	) {
 		// log.Printf("[ListRecord] skipping sync: client is unreachable, vault_id=%s", vault.ID)
 		return withError(nil, false)
 	}

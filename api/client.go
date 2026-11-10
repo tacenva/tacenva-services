@@ -42,16 +42,18 @@ type Client struct {
 	tlsConfigs map[string]TLSConfig
 	clients    map[string]*http.Client
 
-	reachable          bool
-	reachableChangedAt time.Time
+	reachable          map[string]bool
+	reachableChangedAt map[string]time.Time
 	adaptiveInterval   time.Duration
 }
 
 func NewClient() *Client {
 	return &Client{
-		tlsConfigs:       make(map[string]TLSConfig),
-		clients:          make(map[string]*http.Client),
-		adaptiveInterval: 5 * time.Second,
+		tlsConfigs:         make(map[string]TLSConfig),
+		clients:            make(map[string]*http.Client),
+		reachable:          make(map[string]bool),
+		reachableChangedAt: make(map[string]time.Time),
+		adaptiveInterval:   5 * time.Second,
 	}
 }
 
@@ -63,30 +65,39 @@ func (c *Client) ClearToken() {
 	c.Token = ""
 }
 
-func (c *Client) SetReachable(reachable bool) {
+func (c *Client) SetReachable(
+	address string,
+	reachable bool,
+) {
+	address = strings.TrimRight(address, "/")
+
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if c.reachable == reachable {
+	if c.reachable[address] == reachable {
 		return
 	}
 
-	c.reachable = reachable
-	c.reachableChangedAt = time.Now()
+	c.reachable[address] = reachable
+	c.reachableChangedAt[address] = time.Now()
 }
 
-func (c *Client) ReachableChangedAt() time.Time {
+func (c *Client) IsReachable(address string) bool {
+	address = strings.TrimRight(address, "/")
+
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	return c.reachableChangedAt
+	return c.reachable[address]
 }
 
-func (c *Client) IsReachable() bool {
+func (c *Client) ReachableChangedAt(address string) time.Time {
+	address = strings.TrimRight(address, "/")
+
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	return c.reachable
+	return c.reachableChangedAt[address]
 }
 
 func (c *Client) SetAdaptiveInterval(interval time.Duration) {
@@ -400,7 +411,7 @@ func (c *Client) do(
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		if isConnectionError(err) {
-			c.SetReachable(false)
+			c.SetReachable(address, false)
 		}
 
 		return fmt.Errorf("request failed: %w", err)
@@ -410,7 +421,7 @@ func (c *Client) do(
 
 	// Any HTTP response means the server was reached,
 	// regardless of its status code.
-	c.SetReachable(true)
+	c.SetReachable(address, true)
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return parseHTTPError(resp)
@@ -635,7 +646,7 @@ func (c *Client) CheckReachabilityContext(
 	httpClient, err := c.httpClient(address)
 	if err != nil {
 		if isConnectionError(err) {
-			c.SetReachable(false)
+			c.SetReachable(address, false)
 		}
 		return
 	}
@@ -664,7 +675,7 @@ func (c *Client) CheckReachabilityContext(
 		}
 
 		if isConnectionError(err) {
-			c.SetReachable(false)
+			c.SetReachable(address, false)
 		}
 		return
 	}
@@ -675,5 +686,5 @@ func (c *Client) CheckReachabilityContext(
 		return
 	}
 
-	c.SetReachable(true)
+	c.SetReachable(address, true)
 }

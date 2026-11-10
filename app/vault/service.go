@@ -69,7 +69,9 @@ func (s *Service) List() ([]tacpassentity.Vault, bool, error) {
 		return nil, false, err
 	}
 
-	if !s.appDeps.Client.IsReachable() {
+	if !s.appDeps.Client.IsReachable(
+		s.context.SelectedSot.Address,
+	) {
 		return vaultList, false, nil
 	}
 

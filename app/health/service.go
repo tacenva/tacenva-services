@@ -26,12 +26,17 @@ func (s *Service) IsReachable() bool {
 		return false
 	}
 
-	return s.appDeps.Client.IsReachable()
+	return s.appDeps.Client.IsReachable(
+		s.context.SelectedSot.Address,
+	)
 }
 
 func (s *Service) CheckReachabilityContext(ctx context.Context) {
 	if !s.context.IsRemote {
-		s.appDeps.Client.SetReachable(false)
+		s.appDeps.Client.SetReachable(
+			s.context.SelectedSot.Address,
+			false,
+		)
 		return
 	}
 
