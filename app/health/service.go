@@ -1,6 +1,8 @@
 package health
 
 import (
+	"context"
+
 	"github.com/tacenva/tacenva-services/app"
 )
 
@@ -27,13 +29,14 @@ func (s *Service) IsReachable() bool {
 	return s.appDeps.Client.IsReachable()
 }
 
-func (s *Service) CheckReachability() {
+func (s *Service) CheckReachabilityContext(ctx context.Context) {
 	if !s.context.IsRemote {
 		s.appDeps.Client.SetReachable(false)
 		return
 	}
 
-	s.appDeps.Client.CheckReachability(
+	s.appDeps.Client.CheckReachabilityContext(
+		ctx,
 		s.context.SelectedSot.Address,
 	)
 }

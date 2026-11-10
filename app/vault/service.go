@@ -7,7 +7,6 @@ import (
 	"github.com/tacenva/tacenva-services/app"
 	"github.com/tacenva/tacenva-services/app/sourceoftruth"
 
-	"github.com/tacenva/tacenva-core/debug"
 	tacenvaentity "github.com/tacenva/tacenva-core/entity"
 	"github.com/tacenva/tacenva-core/util/keyring"
 	operationsEntity "github.com/tacenva/tacenva-services/entity"
@@ -498,7 +497,7 @@ func (s *Service) AllAccessGroup(refresh bool) ([]tacenvaentity.AccessGroup, err
 			return currentGroup, err
 		}
 
-		debug.LogJSON("updated group", groups)
+		// debug.LogJSON("updated group", groups)
 
 		err = s.vaultService.SyncGroups(
 			s.context.SelectedSot.ID,

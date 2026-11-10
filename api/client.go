@@ -617,7 +617,19 @@ func parseHTTPError(resp *http.Response) error {
 // CheckReachability probes the server's health endpoint.
 // Any HTTP response means the server is reachable.
 // Connection errors set the flag to false; TLS or local errors leave it unchanged.
+
 func (c *Client) CheckReachability(address string) {
+	c.CheckReachabilityContext(
+		context.Background(),
+		address,
+	)
+}
+
+// CheckReachabilityContext allows the caller to cancel an in-flight probe.
+func (c *Client) CheckReachabilityContext(
+	parent context.Context,
+	address string,
+) {
 	address = strings.TrimRight(address, "/")
 
 	httpClient, err := c.httpClient(address)
@@ -629,7 +641,7 @@ func (c *Client) CheckReachability(address string) {
 	}
 
 	ctx, cancel := context.WithTimeout(
-		context.Background(),
+		parent,
 		2*time.Second,
 	)
 	defer cancel()
@@ -646,12 +658,22 @@ func (c *Client) CheckReachability(address string) {
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
+		// Jangan mengubah status jika probe dibatalkan.
+		if ctx.Err() != nil {
+			return
+		}
+
 		if isConnectionError(err) {
 			c.SetReachable(false)
 		}
 		return
 	}
 	defer resp.Body.Close()
+
+	// Jangan menerima hasil probe yang sudah dibatalkan.
+	if ctx.Err() != nil {
+		return
+	}
 
 	c.SetReachable(true)
 }
