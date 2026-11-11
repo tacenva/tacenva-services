@@ -17,8 +17,8 @@ github.com/oklog/ulid/v2 v2.1.2/go.mod h1:rcEKHmBBKfef9DhnvX7y1HZBYxjXb0cP5ExxNs
 github.com/pborman/getopt v0.0.0-20170112200414-7148bc3a4c30/go.mod h1:85jBQOZwpVEaDAr341tbn15RS4fCAsIst0qp7i8ex1o=
 github.com/tacenva/database v1.0.0-alpha.5 h1:w+8cLph/bUJf27SaPMPYk8gCIPwPEs80VErC1q5tFUY=
 github.com/tacenva/database v1.0.0-alpha.5/go.mod h1:UPFLkwRDCP0m3pad2TpMZeJqk1F7bW0EQc1JUn3lOGs=
-github.com/tacenva/tacenva-core v1.0.0-alpha.5 h1:X0mCzBlutcJv0Q+U+0ymW665uTrb3q4ftMcdjLusLfk=
-github.com/tacenva/tacenva-core v1.0.0-alpha.5/go.mod h1:RdA4NftH0S2P5sdusJ2Lh0bvriXVrG07C3k8G06UDrg=
+github.com/tacenva/tacenva-core v1.0.0-alpha.6 h1:0qcWaHpL6HVMqK8PZZXS0yrqaa++WxgrsvgySTjyvDM=
+github.com/tacenva/tacenva-core v1.0.0-alpha.6/go.mod h1:RdA4NftH0S2P5sdusJ2Lh0bvriXVrG07C3k8G06UDrg=
 github.com/tacenva/tacpass-core v1.0.0-alpha.9 h1:iaTPr5o4tr7/1njC+Eo6/wR20lbMQxK11Vd/ogzO/Oo=
 github.com/tacenva/tacpass-core v1.0.0-alpha.9/go.mod h1:HTLI1rwQ3ewN3tsK1J4rx91TP+2QIN070iGb6741ks4=
 golang.org/x/crypto v0.56.0 h1:GUh5Ii4J5jtcseSMiRqr1jXCNHoxjeV9Fmekc2oLy6Y=
