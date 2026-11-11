@@ -8,6 +8,7 @@ import (
 	"github.com/tacenva/tacenva-services/app/sourceoftruth"
 
 	tacenvaentity "github.com/tacenva/tacenva-core/entity"
+	"github.com/tacenva/tacenva-core/genericerror"
 	"github.com/tacenva/tacenva-core/util/keyring"
 	operationsEntity "github.com/tacenva/tacenva-services/entity"
 	"github.com/tacenva/tacpass-core/contract"
@@ -300,14 +301,11 @@ func (s *Service) CreateVault(
 	vaultName string,
 	groupIDs []string,
 ) error {
-	if s.context == nil {
-		return errors.New("context is nil")
-	}
-
-	if s.context.SelectedSot == nil {
-		return errors.New(
-			"selected source of truth is nil",
-		)
+	if err := genericerror.ValidateRequired(map[string]any{
+		"context":                  s.context,
+		"selected source of truth": s.context.SelectedSot,
+	}); err != nil {
+		return err
 	}
 
 	var (
@@ -353,26 +351,14 @@ func (s *Service) CreateVault(
 func (s *Service) UpdateVault(
 	vault *tacpassentity.Vault,
 ) error {
-	if vault == nil {
-		return errors.New("vault cannot be nil")
-	}
-
-	if vault.ID == "" {
-		return errors.New("vault id cannot be empty")
-	}
-
-	if vault.Name == "" {
-		return errors.New("vault name cannot be empty")
-	}
-
-	if s.context == nil {
-		return errors.New("context is nil")
-	}
-
-	if s.context.SelectedSot == nil {
-		return errors.New(
-			"selected source of truth is nil",
-		)
+	if err := genericerror.ValidateRequired(map[string]any{
+		"vault":                    vault,
+		"vault id":                 vault.ID,
+		"vault name":               vault.Name,
+		"context":                  s.context,
+		"selected source of truth": s.context.SelectedSot,
+	}); err != nil {
+		return err
 	}
 
 	var (
@@ -418,22 +404,14 @@ func (s *Service) UpdateVault(
 func (s *Service) DeleteVault(
 	vault *tacpassentity.Vault,
 ) error {
-	if vault == nil {
-		return errors.New("vault cannot be nil")
-	}
-
-	if vault.ID == "" {
-		return errors.New("vault id cannot be empty")
-	}
-
-	if s.context == nil {
-		return errors.New("context is nil")
-	}
-
-	if s.context.SelectedSot == nil {
-		return errors.New(
-			"selected source of truth is nil",
-		)
+	if err := genericerror.ValidateRequired(map[string]any{
+		"vault":                    vault,
+		"vault id":                 vault.ID,
+		"vault name":               vault.Name,
+		"context":                  s.context,
+		"selected source of truth": s.context.SelectedSot,
+	}); err != nil {
+		return err
 	}
 
 	var (

@@ -6,6 +6,7 @@ import (
 
 	"github.com/tacenva/database"
 	"github.com/tacenva/tacenva-core/config"
+	"github.com/tacenva/tacenva-core/genericerror"
 	operationsEntity "github.com/tacenva/tacenva-services/entity"
 	"github.com/tacenva/tacpass-core/contract"
 	coreEntity "github.com/tacenva/tacpass-core/entity"
@@ -15,32 +16,14 @@ func (s *Service) AppendRecord(
 	vault *coreEntity.Vault,
 	record *coreEntity.VaultRecord,
 ) (*coreEntity.VaultRecord, error) {
-	if vault == nil {
-		return nil, errors.New(
-			"vault cannot be nil",
-		)
-	}
-
-	if record == nil {
-		return nil, errors.New(
-			"record cannot be nil",
-		)
-	}
-
-	if vault.ID == "" {
-		return nil, errors.New(
-			"vault id cannot be empty",
-		)
-	}
-
-	if s.context == nil {
-		return nil, errors.New("context is nil")
-	}
-
-	if s.context.SelectedSot == nil {
-		return nil, errors.New(
-			"selected source of truth is nil",
-		)
+	if err := genericerror.ValidateRequired(map[string]any{
+		"vault":                    vault,
+		"vault id":                 vault.ID,
+		"record":                   record,
+		"context":                  s.context,
+		"selected source of truth": s.context.SelectedSot,
+	}); err != nil {
+		return nil, err
 	}
 
 	if record.RenewalPeriod < 0 {
@@ -98,38 +81,15 @@ func (s *Service) UpdateRecord(
 	vault *coreEntity.Vault,
 	record *coreEntity.VaultRecord,
 ) (*coreEntity.VaultRecord, error) {
-	if vault == nil {
-		return nil, errors.New(
-			"vault cannot be nil",
-		)
-	}
-
-	if record == nil {
-		return nil, errors.New(
-			"record cannot be nil",
-		)
-	}
-
-	if vault.ID == "" {
-		return nil, errors.New(
-			"vault id cannot be empty",
-		)
-	}
-
-	if record.ID == "" {
-		return nil, errors.New(
-			"record id cannot be empty",
-		)
-	}
-
-	if s.context == nil {
-		return nil, errors.New("context is nil")
-	}
-
-	if s.context.SelectedSot == nil {
-		return nil, errors.New(
-			"selected source of truth is nil",
-		)
+	if err := genericerror.ValidateRequired(map[string]any{
+		"vault":                    vault,
+		"record":                   record,
+		"vault id":                 vault.ID,
+		"record id":                record.ID,
+		"context":                  s.context,
+		"selected source of truth": s.context.SelectedSot,
+	}); err != nil {
+		return nil, err
 	}
 
 	if record.RenewalPeriod < 0 {
@@ -200,38 +160,15 @@ func (s *Service) DeleteRecord(
 	vault *coreEntity.Vault,
 	record *coreEntity.VaultRecord,
 ) error {
-	if vault == nil {
-		return errors.New(
-			"vault cannot be nil",
-		)
-	}
-
-	if record == nil {
-		return errors.New(
-			"record cannot be nil",
-		)
-	}
-
-	if vault.ID == "" {
-		return errors.New(
-			"vault id cannot be empty",
-		)
-	}
-
-	if record.ID == "" {
-		return errors.New(
-			"record id cannot be empty",
-		)
-	}
-
-	if s.context == nil {
-		return errors.New("context is nil")
-	}
-
-	if s.context.SelectedSot == nil {
-		return errors.New(
-			"selected source of truth is nil",
-		)
+	if err := genericerror.ValidateRequired(map[string]any{
+		"vault":                    vault,
+		"record":                   record,
+		"vault id":                 vault.ID,
+		"record id":                record.ID,
+		"context":                  s.context,
+		"selected source of truth": s.context.SelectedSot,
+	}); err != nil {
+		return err
 	}
 
 	var syncChangeID string
@@ -425,27 +362,12 @@ func (s *Service) SelectVault(
 	vault *coreEntity.Vault,
 	wrappedVaultKey string,
 ) error {
-	if vault == nil {
-		err := errors.New("vault cannot be nil")
-		// log.Printf("[SelectVault] validation failed: %v", err)
-		return err
-	}
-
-	if vault.ID == "" {
-		err := errors.New("vault id cannot be empty")
-		// log.Printf("[SelectVault] validation failed: %v", err)
-		return err
-	}
-
-	if s.context == nil {
-		err := errors.New("context is nil")
-		// log.Printf("[SelectVault] validation failed: %v", err)
-		return err
-	}
-
-	if s.context.SelectedSot == nil {
-		err := errors.New("selected source of truth is nil")
-		// log.Printf("[SelectVault] validation failed: %v", err)
+	if err := genericerror.ValidateRequired(map[string]any{
+		"vault":                    vault,
+		"vault id":                 vault.ID,
+		"context":                  s.context,
+		"selected source of truth": s.context.SelectedSot,
+	}); err != nil {
 		return err
 	}
 
@@ -527,21 +449,12 @@ func (s *Service) ListRecord(
 		return records, hasChanges, err
 	}
 
-	if vault == nil {
-		err := errors.New("vault cannot be nil")
-		// log.Printf("[ListRecord] validation failed: %v", err)
-		return withError(err, false)
-	}
-
-	if s.context == nil {
-		err := errors.New("context is nil")
-		// log.Printf("[ListRecord] validation failed: vault_id=%s, error=%v", vault.ID, err)
-		return withError(err, false)
-	}
-
-	if s.context.SelectedSot == nil {
-		err := errors.New("selected source of truth is nil")
-		// log.Printf("[ListRecord] validation failed: vault_id=%s, error=%v", vault.ID, err)
+	if err := genericerror.ValidateRequired(map[string]any{
+		"vault":                    vault,
+		"vault id":                 vault.ID,
+		"context":                  s.context,
+		"selected source of truth": s.context.SelectedSot,
+	}); err != nil {
 		return withError(err, false)
 	}
 

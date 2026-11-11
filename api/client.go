@@ -17,6 +17,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/tacenva/tacenva-core/genericerror"
 )
 
 type TLSConfig struct {
@@ -458,7 +460,7 @@ func (c *Client) do(
 
 	if authenticated {
 		if c.Token == "" {
-			return errors.New("authentication token is required")
+			return genericerror.ErrRequired("authentication token")
 		}
 
 		req.Header.Set("Authorization", "Bearer "+c.Token)
@@ -629,7 +631,7 @@ func newTLSConfig(
 	}
 
 	if parsedURL.Hostname() == "" {
-		return nil, errors.New("server address hostname is required")
+		return nil, genericerror.ErrRequired("server address hostname")
 	}
 
 	hostname := parsedURL.Hostname()

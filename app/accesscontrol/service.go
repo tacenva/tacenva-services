@@ -38,12 +38,12 @@ func NewService(
 func (s *Service) KeyPairOfChild(
 	publicKeyOfChild, wrappedPrivateKeyOfChild string,
 ) (*keyring.KeyPair, error) {
-	if s.selectedGroup == nil || s.keyPairOfSelectedGroup == nil {
-		return nil, genericerror.ErrEmptyValue
-	}
-
-	if wrappedPrivateKeyOfChild == "" {
-		return nil, nil
+	if err := genericerror.ValidateRequired(map[string]any{
+		"selected group":               s.selectedGroup,
+		"keypair of selected group":    s.keyPairOfSelectedGroup,
+		"wrapped private key of child": wrappedPrivateKeyOfChild,
+	}); err != nil {
+		return nil, err
 	}
 
 	privateKeyOfChild, err := s.keyPairOfSelectedGroup.Open(wrappedPrivateKeyOfChild)
@@ -194,7 +194,7 @@ func (s *Service) CreateUnit(
 	accessUnit *tacenvaentity.AccessUnit,
 ) (*CreateUnitResult, error) {
 	if accessUnit == nil {
-		return nil, errors.New("access unit is required")
+		return nil, genericerror.ErrRequired("access unit")
 	}
 
 	if s.keyPairOfSelectedGroup == nil {

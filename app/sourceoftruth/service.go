@@ -17,6 +17,7 @@ import (
 	"github.com/tacenva/tacenva-core/config"
 	tacenvacontract "github.com/tacenva/tacenva-core/contract"
 	tacenvaentity "github.com/tacenva/tacenva-core/entity"
+	"github.com/tacenva/tacenva-core/genericerror"
 	"github.com/tacenva/tacenva-core/util/keyring"
 	"github.com/tacenva/tacenva-services/api"
 	"github.com/tacenva/tacenva-services/app"
@@ -201,7 +202,7 @@ func normalizeAddress(address string) string {
 func (s *Service) uniqueSotIdentity(identity string) (string, error) {
 	identity = strings.Join(strings.Fields(identity), " ")
 	if identity == "" {
-		return "", errors.New("sot identity cannot be empty")
+		return "", genericerror.ErrRequired("source of truth identity")
 	}
 
 	normalized := strings.ToLower(identity)
@@ -373,9 +374,7 @@ func (s *Service) Update(
 	}
 
 	if updatedSoT == nil {
-		return errors.New(
-			"source of truth cannot be nil",
-		)
+		return genericerror.ErrRequired("source of truth")
 	}
 
 	updatedSoT.Address = normalizeAddress(
@@ -405,9 +404,7 @@ func (s *Service) ResetTLSFingerprint(
 	}
 
 	if sot == nil {
-		return errors.New(
-			"source of truth cannot be nil",
-		)
+		return genericerror.ErrRequired("source of truth")
 	}
 
 	// Hapus fingerprint lama dari persisted SoT.
@@ -504,16 +501,11 @@ func (s *Service) Delete(
 		return ErrForbidden
 	}
 
-	if sot == nil {
-		return errors.New(
-			"source of truth cannot be nil",
-		)
-	}
-
-	if sot.ID == "" {
-		return errors.New(
-			"source of truth id cannot be empty",
-		)
+	if err := genericerror.ValidateRequired(map[string]any{
+		"source of truth": sot,
+		"sot id":          sot.ID,
+	}); err != nil {
+		return err
 	}
 
 	var stored entity.SourceOfTruth
