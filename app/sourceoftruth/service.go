@@ -16,7 +16,6 @@ import (
 	"github.com/tacenva/tacenva-core/auth"
 	"github.com/tacenva/tacenva-core/config"
 	tacenvacontract "github.com/tacenva/tacenva-core/contract"
-	"github.com/tacenva/tacenva-core/debug"
 	tacenvaentity "github.com/tacenva/tacenva-core/entity"
 	"github.com/tacenva/tacenva-core/util/keyring"
 	"github.com/tacenva/tacenva-services/api"
@@ -600,7 +599,7 @@ func (s *Service) CheckStatus(
 		unwrappedGroupPrivateKey, err := sot.Auth.KeyPairOfAccessUnit.Open(
 			authData.GroupAssignment.GroupKeyData.WrappedKey,
 		)
-		debug.LogJSON("auth data", authData)
+		// debug.LogJSON("auth data", authData)
 		if err != nil {
 			log.Println(err)
 			return err

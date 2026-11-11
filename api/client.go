@@ -69,17 +69,39 @@ func (c *Client) SetReachable(
 	address string,
 	reachable bool,
 ) {
+	c.setReachable(address, reachable, "unknown", "")
+}
+
+func (c *Client) setReachable(
+	address string,
+	reachable bool,
+	source string,
+	reason string,
+) {
 	address = strings.TrimRight(address, "/")
 
 	c.mu.Lock()
-	defer c.mu.Unlock()
 
-	if c.reachable[address] == reachable {
+	previous := c.reachable[address]
+
+	if previous == reachable {
+		c.mu.Unlock()
 		return
 	}
 
 	c.reachable[address] = reachable
 	c.reachableChangedAt[address] = time.Now()
+
+	c.mu.Unlock()
+
+	// debug.LogJSON("reachability changed", map[string]any{
+	// 	"address":   address,
+	// 	"previous":  previous,
+	// 	"current":   reachable,
+	// 	"source":    source,
+	// 	"reason":    reason,
+	// 	"changedAt": time.Now().Format(time.RFC3339Nano),
+	// })
 }
 
 func (c *Client) IsReachable(address string) bool {
@@ -87,6 +109,8 @@ func (c *Client) IsReachable(address string) bool {
 
 	c.mu.RLock()
 	defer c.mu.RUnlock()
+
+	// debug.LogJSON("reachable per address", c.reachable)
 
 	return c.reachable[address]
 }
@@ -161,8 +185,20 @@ func (c *Client) ClearTLS(address string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	delete(c.tlsConfigs, address)
+	existing := c.tlsConfigs[address]
+
+	// Preserve the discovered TCP address.
+	dialAddress := existing.DialAddress
+
 	delete(c.clients, address)
+
+	if dialAddress != "" {
+		c.tlsConfigs[address] = TLSConfig{
+			DialAddress: dialAddress,
+		}
+	} else {
+		delete(c.tlsConfigs, address)
+	}
 }
 
 // isConnectionError identifies errors that indicate a connection failure.
@@ -172,28 +208,54 @@ func isConnectionError(err error) bool {
 		return false
 	}
 
-	// Unwrap URL errors first. A url.Error can itself implement net.Error,
-	// even when the underlying cause is a TLS verification failure.
 	var urlErr *url.Error
 	if errors.As(err, &urlErr) {
-		return isConnectionError(urlErr.Err)
+		result := isConnectionError(urlErr.Err)
+
+		// debug.LogJSON("connection error classification", map[string]any{
+		// 	"type":   "url.Error",
+		// 	"error":  urlErr.Err.Error(),
+		// 	"result": result,
+		// })
+
+		return result
 	}
 
 	var opErr *net.OpError
 	if errors.As(err, &opErr) {
+		// debug.LogJSON("connection error classification", map[string]any{
+		// 	"type":   "net.OpError",
+		// 	"error":  err.Error(),
+		// 	"result": true,
+		// })
 		return true
 	}
 
 	var dnsErr *net.DNSError
 	if errors.As(err, &dnsErr) {
+		// debug.LogJSON("connection error classification", map[string]any{
+		// 	"type":   "net.DNSError",
+		// 	"error":  err.Error(),
+		// 	"result": true,
+		// })
 		return true
 	}
 
-	// Covers network timeouts and other network errors.
 	var netErr net.Error
 	if errors.As(err, &netErr) {
+		// debug.LogJSON("connection error classification", map[string]any{
+		// 	"type":   "net.Error",
+		// 	"error":  err.Error(),
+		// 	"result": true,
+		// })
 		return true
 	}
+
+	// debug.LogJSON("connection error classification", map[string]any{
+	// 	"type":   fmt.Sprintf("%T", err),
+	// 	"error":  err.Error(),
+	// 	"result": false,
+	// })
 
 	return false
 }
@@ -408,10 +470,28 @@ func (c *Client) do(
 		return err
 	}
 
+	// startedAt := time.Now()
+
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		if isConnectionError(err) {
-			c.SetReachable(address, false)
+		connectionError := isConnectionError(err)
+
+		// debug.LogJSON("API request failed", map[string]any{
+		// 	"method":          method,
+		// 	"address":         address,
+		// 	"path":            path,
+		// 	"error":           err.Error(),
+		// 	"connectionError": connectionError,
+		// 	"elapsed":         time.Since(startedAt).String(),
+		// })
+
+		if connectionError {
+			c.setReachable(
+				address,
+				false,
+				"api-request",
+				err.Error(),
+			)
 		}
 
 		return fmt.Errorf("request failed: %w", err)
@@ -419,9 +499,26 @@ func (c *Client) do(
 
 	defer resp.Body.Close()
 
-	// Any HTTP response means the server was reached,
-	// regardless of its status code.
-	c.SetReachable(address, true)
+	// debug.LogJSON("API request succeeded", map[string]any{
+	// 	"method":     method,
+	// 	"address":    address,
+	// 	"path":       path,
+	// 	"statusCode": resp.StatusCode,
+	// 	"elapsed":    time.Since(startedAt).String(),
+	// })
+
+	c.setReachable(
+		address,
+		true,
+		"api-request",
+		fmt.Sprintf("HTTP status %d", resp.StatusCode),
+	)
+
+	// defer resp.Body.Close()
+
+	// // Any HTTP response means the server was reached,
+	// // regardless of its status code.
+	// c.SetReachable(address, true)
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return parseHTTPError(resp)
@@ -473,6 +570,12 @@ func (c *Client) httpClient(
 		)
 	}
 
+	// debug.LogJSON("HTTP client configuration", map[string]any{
+	// 	"address":     address,
+	// 	"dialAddress": config.DialAddress,
+	// 	"hasDial":     config.DialAddress != "",
+	// })
+
 	tlsConfig, err := newTLSConfig(address, config)
 	if err != nil {
 		return nil, err
@@ -494,6 +597,10 @@ func (c *Client) httpClient(
 			network string,
 			_ string,
 		) (net.Conn, error) {
+			// debug.LogJSON("HTTP dialing", map[string]any{
+			// 	"network":     network,
+			// 	"dialAddress": dialAddress,
+			// })
 			return dialer.DialContext(
 				ctx,
 				network,
@@ -643,11 +750,26 @@ func (c *Client) CheckReachabilityContext(
 ) {
 	address = strings.TrimRight(address, "/")
 
+	// debug.LogJSON("reachability probe started", map[string]any{
+	// 	"address": address,
+	// })
+
 	httpClient, err := c.httpClient(address)
 	if err != nil {
+		// debug.LogJSON("reachability client error", map[string]any{
+		// 	"address": address,
+		// 	"error":   err.Error(),
+		// })
+
 		if isConnectionError(err) {
-			c.SetReachable(address, false)
+			c.setReachable(
+				address,
+				false,
+				"health-check",
+				err.Error(),
+			)
 		}
+
 		return
 	}
 
@@ -664,27 +786,66 @@ func (c *Client) CheckReachabilityContext(
 		nil,
 	)
 	if err != nil {
+		// debug.LogJSON("reachability request creation failed", map[string]any{
+		// 	"address": address,
+		// 	"error":   err.Error(),
+		// })
 		return
 	}
+
+	// startedAt := time.Now()
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		// Jangan mengubah status jika probe dibatalkan.
 		if ctx.Err() != nil {
+			// debug.LogJSON("reachability probe canceled", map[string]any{
+			// 	"address": address,
+			// 	"error":   ctx.Err().Error(),
+			// })
 			return
 		}
 
-		if isConnectionError(err) {
-			c.SetReachable(address, false)
+		connectionError := isConnectionError(err)
+
+		// debug.LogJSON("reachability probe failed", map[string]any{
+		// 	"address":         address,
+		// 	"error":           err.Error(),
+		// 	"connectionError": connectionError,
+		// 	"elapsed":         time.Since(startedAt).String(),
+		// })
+
+		if connectionError {
+			c.setReachable(
+				address,
+				false,
+				"health-check",
+				err.Error(),
+			)
 		}
+
 		return
 	}
+
 	defer resp.Body.Close()
 
-	// Jangan menerima hasil probe yang sudah dibatalkan.
 	if ctx.Err() != nil {
+		// debug.LogJSON("reachability probe result ignored", map[string]any{
+		// 	"address": address,
+		// 	"error":   ctx.Err().Error(),
+		// })
 		return
 	}
 
-	c.SetReachable(address, true)
+	// debug.LogJSON("reachability probe succeeded", map[string]any{
+	// 	"address":    address,
+	// 	"statusCode": resp.StatusCode,
+	// 	"elapsed":    time.Since(startedAt).String(),
+	// })
+
+	c.setReachable(
+		address,
+		true,
+		"health-check",
+		fmt.Sprintf("HTTP status %d", resp.StatusCode),
+	)
 }
