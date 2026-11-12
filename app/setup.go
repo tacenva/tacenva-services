@@ -2,11 +2,14 @@ package app
 
 import (
 	"fmt"
+	"runtime"
+	"strconv"
 
 	"github.com/tacenva/database"
 	"github.com/tacenva/tacenva-core/config"
 	"github.com/tacenva/tacenva-services/api"
 	"github.com/tacenva/tacenva-services/app/server"
+	"github.com/tacenva/tacenva-services/internal/discovery"
 	"github.com/tacenva/tacenva-services/internal/discovery/mdns"
 	"github.com/tacenva/tacenva-services/internal/discovery/vpn"
 	tacpassapp "github.com/tacenva/tacpass-core/app"
@@ -42,13 +45,7 @@ func Setup(dev bool) (*Deps, error) {
 
 	client := api.NewClient()
 
-	mdnsDiscoverer := mdns.NewDiscoverer()
-	vpnDiscoverer := vpn.NewDiscoverer("tun0")
-
-	serverService := server.NewService(
-		mdnsDiscoverer,
-		vpnDiscoverer,
-	)
+	serverService := setupDiscovery()
 
 	deps := &Deps{
 		Config:        cfg,
@@ -74,4 +71,57 @@ func openSQLite(path string) (*gorm.DB, error) {
 	}
 
 	return db, nil
+}
+
+func vpnInterfaceNames() []string {
+	switch runtime.GOOS {
+	case "linux":
+		return []string{
+			"tun0",
+			"tun1",
+			"tap0",
+			"tap1",
+			"wg0",
+			"wg1",
+			"tailscale0",
+		}
+
+	case "windows":
+		return []string{
+			"OpenVPN",
+			"Ethernet",
+			"WireGuard Tunnel",
+			"Tailscale",
+			"ZeroTier One",
+		}
+
+	case "darwin":
+		names := []string{
+			"tun0",
+			"tap0",
+		}
+
+		for i := 0; i <= 15; i++ {
+			names = append(names, "utun"+strconv.Itoa(i))
+		}
+
+		return names
+	}
+
+	return nil
+}
+
+func setupDiscovery() *server.Service {
+	discoverers := []discovery.Discoverer{
+		mdns.NewDiscoverer(),
+	}
+
+	for _, name := range vpnInterfaceNames() {
+		discoverers = append(
+			discoverers,
+			vpn.NewDiscoverer(name),
+		)
+	}
+
+	return server.NewService(discoverers...)
 }
