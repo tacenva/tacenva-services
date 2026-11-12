@@ -88,7 +88,7 @@ func vpnInterfaceNames() []string {
 
 	case "windows":
 		return []string{
-			"OpenVPN",
+			"OpenVPN Connect DCO Adapter",
 			"Ethernet",
 			"WireGuard Tunnel",
 			"Tailscale",
